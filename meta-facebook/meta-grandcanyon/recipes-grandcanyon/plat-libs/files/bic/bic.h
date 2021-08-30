@@ -35,7 +35,6 @@ extern "C" {
 #include <libusb-1.0/libusb.h>
 #include <openbmc/kv.h>
 
-#define MAX_RETRY             3
 #define BIC_MAX_RETRY         180 // 1 s * 180 = 3 mins
 
 #define IPMB_RETRY_DELAY_TIME 20 // millisecond
@@ -103,6 +102,10 @@ enum {
 enum {
   STATUS_BIC_NOT_READY = 0x0,
   STATUS_BIC_READY,
+};
+
+enum {
+  DUMP_BIOS = 0,
 };
 
 // BIC GPIO

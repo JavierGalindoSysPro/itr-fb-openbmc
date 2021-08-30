@@ -17,7 +17,7 @@
 #define ESC_ALT ESCAPE"[5;7m"
 #define ESC_RST ESCAPE"[m"
 
-static sensor_desc_t dynamic_cri_sensor[MAX_SENSOR_NUM] = {0};
+static sensor_desc_t dynamic_cri_sensor[MAX_SENSOR_NUM + 1] = {0};
 
 //These postcodes are defined in document "F08 BIOS Specification" Revision: 2A
 static post_desc_t pdesc_phase1[] = {
@@ -609,7 +609,7 @@ int plat_get_sensor_desc(uint8_t fru, sensor_desc_t **desc, size_t *desc_count)
         current_cnt += cri_sensor_gpv3_cnt;
       }
     }
-
+    
     *desc = dynamic_cri_sensor;
     *desc_count = current_cnt;
   }
@@ -619,7 +619,7 @@ int plat_get_sensor_desc(uint8_t fru, sensor_desc_t **desc, size_t *desc_count)
 uint8_t plat_get_fru_sel(void)
 {
   uint8_t pos;
-  if (pal_get_uart_select_from_cpld(&pos)) {
+  if (pal_get_uart_select_from_kv(&pos)) {
     return  0;
   }
   return pos;
@@ -647,7 +647,8 @@ int plat_get_board_id(char *id)
   uint8_t pos;
   uint8_t buf[256] = {0x00};
   uint8_t rlen;
-  if (pal_get_uart_select_from_cpld(&pos)) {
+
+  if (pal_get_uart_select_from_kv(&pos)) {
     return -1;
   }
   if(pal_get_board_id(pos, buf, 0, buf, &rlen)) {
@@ -676,6 +677,7 @@ plat_get_etra_fw_version(uint8_t slot_id, char *fw_text)
   uint8_t rlen = 4;
   uint8_t i2c_bus = 12;
   int i2cfd = 0;
+  uint8_t bmc_location = 0;
   uint8_t type_2ou = UNKNOWN_BOARD;
 
   if (fw_text == NULL)
@@ -686,12 +688,22 @@ plat_get_etra_fw_version(uint8_t slot_id, char *fw_text)
 
   //CPLD Version
   if (slot_id == FRU_ALL) { //uart select BMC position
+    ret = fby3_common_get_bmc_location(&bmc_location);
+    if (ret < 0) {
+      syslog(LOG_WARNING, "Failed to get bmc locaton");
+      return -1;
+    }
+
+    if(bmc_location == NIC_BMC) {
+      i2c_bus = 9;
+    }
 
     ret = i2c_cdev_slave_open(i2c_bus, cpld_addr >> 1, I2C_SLAVE_FORCE_CLAIM);
     if (ret < 0) {
-      syslog(LOG_WARNING, "Failed to open bus 12");
+      syslog(LOG_WARNING, "Failed to open bus %d",i2c_bus);
       return -1;
     }
+
     i2cfd = ret;
     ret = i2c_rdwr_msg_transfer(i2cfd, cpld_addr, tbuf, tlen, rbuf, rlen);
     if ( i2cfd > 0 ) 
@@ -702,7 +714,6 @@ plat_get_etra_fw_version(uint8_t slot_id, char *fw_text)
     }
     sprintf(entry,"CPLD_ver:\n%02X%02X%02X%02X\n", rbuf[3], rbuf[2], rbuf[1], rbuf[0]);
     strcat(fw_text, entry);
-
   } else {
     //Bridge-IC Version
     if (bic_get_fw_ver(slot_id, FW_BIC, ver)) {
@@ -727,7 +738,10 @@ plat_get_etra_fw_version(uint8_t slot_id, char *fw_text)
       strcat(fw_text, entry);
     }
 
-    if ( (bic_is_m2_exp_prsnt(slot_id) & PRESENT_2OU) == PRESENT_2OU ) {
+    ret = bic_is_m2_exp_prsnt(slot_id);
+    if (ret < 0) {
+      syslog(LOG_WARNING, "Failed to get 1ou & 2ou present status");
+    } else if ( (ret & PRESENT_2OU) == PRESENT_2OU ) {
       if ( fby3_common_get_2ou_board_type(slot_id, &type_2ou) < 0) {
         syslog(LOG_WARNING, "Failed to get slot%d 2ou board type\n",slot_id);
       } else if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
@@ -772,15 +786,35 @@ plat_get_etra_fw_version(uint8_t slot_id, char *fw_text)
 
 int plat_get_extra_sysinfo(uint8_t fru, char *info)
 {
+  int ret = 0;
   char fru_name[16];
+  uint8_t index = 0;
+  uint8_t bmc_location = 0;
+
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "Failed to get bmc locaton");
+    return -1;
+  }
+
+  if(bmc_location == NIC_BMC) {
+    if(bic_get_mb_index(&index) !=0)
+      return -1;
+    if((fru == FRU_SLOT1) && (index == FRU_SLOT3))
+      fru = FRU_SLOT3;
+  }
 
   if(fru == FRU_ALL) {
     fru = FRU_BMC;
   }
 
   if (!pal_get_fru_name( fru, fru_name)) {
-
-    sprintf(info, "FRU:%s", fru_name);
+    if(fru == FRU_BMC && bmc_location == NIC_BMC) {
+      sprintf(info, "FRU:%s%d", fru_name,index);
+    }
+    else {
+      sprintf(info, "FRU:%s", fru_name);
+    }
   }
   return 0;
 }

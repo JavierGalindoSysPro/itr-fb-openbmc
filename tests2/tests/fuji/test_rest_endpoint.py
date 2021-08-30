@@ -83,6 +83,7 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
     SCM_FIRMWARE_INFO_ENDPOINT = "/api/sys/firmware_info/scm"
     ALL_FIRMWARE_INFO_ENDPOINT = "/api/sys/firmware_info/all"
     PIM_INFO_ENDPOINT = "/api/sys/piminfo"
+    SMB_INFO_ENDPOINT = "/api/sys/smbinfo"
     PIM_SERIAL_ENDPOINT = "/api/sys/pimserial"
 
     # "/api/sys"
@@ -91,7 +92,6 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
             "server",
             "bmc",
             "mb",
-            "slotid",
             "firmware_info",
             "presence",
             "feutil",
@@ -99,7 +99,6 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
             "psu_update",
             "gpios",
             "sensors",
-            "mTerm_status",
         ]
 
     def test_endpoint_api_sys(self):
@@ -213,6 +212,16 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
         self.set_endpoint_fruid_scm_attributes()
         self.verify_endpoint_attributes(
             RestEndpointTest.FRUID_SCM_ENDPOINT, self.endpoint_fruid_scm_attrb
+        )
+
+    # "/api/sys/smbutil"
+    def set_endpoint_fruid_smb_attributes(self):
+        self.endpoint_fruid_smb_attrb = self.FRUID_ATTRIBUTES
+
+    def test_endpoint_api_sys_fruid_smb(self):
+        self.set_endpoint_fruid_smb_attributes()
+        self.verify_endpoint_attributes(
+            RestEndpointTest.SMB_INFO_ENDPOINT, self.endpoint_fruid_smb_attrb
         )
 
     # "/api/sys/mb/fruid"
@@ -509,7 +518,6 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
         self.endpoint_firmware_info_all_attributes = [
             "BMC Version",
             "Fan Speed Controller Version",
-            "ROM Version",
             "TPM Version",
             "FCMCPLD B",
             "FCMCPLD T",
@@ -546,7 +554,6 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
     # "/api/sys/piminfo"
     def set_endpoint_piminfo_attributes(self):
         self.endpoint_piminfo_attrb = [
-            "PIM1",
             "PIM2",
             "PIM3",
             "PIM4",
@@ -554,6 +561,7 @@ class RestEndpointTest(FbossRestEndpointTest, unittest.TestCase):
             "PIM6",
             "PIM7",
             "PIM8",
+            "PIM9",
         ]
 
     def test_endpoint_api_sys_piminfo(self):

@@ -72,30 +72,18 @@ const char pal_fru_list_sensor_history[] = "all, server, uic, nic, e1s_iocm";
 // export to power-util
 const char pal_server_list[] = "server";
 
-// export to fruid-util, only support iocm of FRU_E1S_IOCM
-const char pal_fru_list_print[] = "all, server, bmc, uic, dpb, scc, nic, iocm, fan0, fan1, fan2, fan3";
-const char pal_fru_list_rw[] = "server, bmc, uic, nic, iocm";
+const char pal_dev_pwr_list[] = "e1s0, e1s1";
+const char pal_dev_pwr_option_list[] = "status, off, on";
 
-// fru name list for pal_get_fru_id(), the name of FRU_E1S_IOCM could be "iocm" or "e1s_iocm"
-const char *fru_str_list[][2] = {
-  { "all"   , "" },
-  { "server", "" },
-  { "bmc"   , "" },
-  { "uic"   , "" },
-  { "dpb"   , "" },
-  { "scc"   , "" },
-  { "nic"   , "" },
-  { "iocm"  , "e1s_iocm" },
-  { "fan0"  , "" },
-  { "fan1"  , "" },
-  { "fan2"  , "" },
-  { "fan3"  , "" },
-};
+// export to fruid-util
+const char pal_fru_list_print[] = "all, server, bmc, uic, dpb, scc, nic, e1s_iocm, fan0, fan1, fan2, fan3";
+const char pal_fru_list_rw[] = "server, bmc, uic, nic, e1s_iocm";
+
+// fru name list for pal_get_fru_id()
+const char *fru_str_list[] = {"all", "server", "bmc", "uic", "dpb", "scc", "nic", "e1s_iocm", "fan0", "fan1", "fan2", "fan3"};
 
 const char pal_pwm_list[] = "0";
 const char pal_tach_list[] = "0...7";
-
-static uint8_t sel_error_record = 0;
 
 size_t pal_pwm_cnt = 1;
 size_t pal_tach_cnt = 8;
@@ -111,6 +99,11 @@ enum key_event {
 enum net_intf_act {
   NET_INTF_DISABLE,
   NET_INTF_ENABLE,
+};
+
+enum {
+  UNBIND = 0,
+  BIND = 1
 };
 
 struct pal_key_cfg {
@@ -139,6 +132,7 @@ struct pal_key_cfg {
   {"bmc_health", "1", NULL},
   {"timestamp_sled", "0", NULL},
   {"heartbeat_health", "1", NULL},
+  {"fan_dead_rearm", "0", NULL},
   /* Add more Keys here */
   {NULL, NULL, NULL} /* This is the last key of the list */
 };
@@ -188,6 +182,41 @@ uint8_t GPIO_BOARD_REV_ID_TABLE[MAX_NUM_OF_BOARD_REV_ID_GPIO] = {
   GPIO_BOARD_REV_ID2,
 };
 
+PCIE_ERR_DECODE pcie_err_table[] = {
+  {0x00, "Receiver Error"},
+  {0x01, "Bad TLP"},
+  {0x02, "Bad DLLP"},
+  {0x03, "Replay Time-out"},
+  {0x04, "Replay Rollover"},
+  {0x05, "Advisory Non-Fatal"},
+  {0x06, "Corrected Internal Error"},
+  {0x07, "Header Log Overflow"},
+  {0x20, "Data Link Protocol Error"},
+  {0x21, "Surprise Down Error"},
+  {0x22, "Poisoned TLP"},
+  {0x23, "Flow Control Protocol Error"},
+  {0x24, "Completion Timeout"},
+  {0x25, "Completer Abort"},
+  {0x26, "Unexpected Completion"},
+  {0x27, "Receiver Buffer Overflow"},
+  {0x28, "Malformed TLP"},
+  {0x29, "ECRC Error"},
+  {0x2A, "Unsupported Request"},
+  {0x2B, "ACS Violation"},
+  {0x2C, "Uncorrectable Internal Error"},
+  {0x2D, "MC Blocked TLP"},
+  {0x2E, "AtomicOp Egress Blocked"},
+  {0x2F, "TLP Prefix Blocked Error"},
+  {0x30, "Poisoned TLP Egress Blocked"},
+  {0x50, "Received ERR_COR Message"},
+  {0x51, "Received ERR_NONFATAL Message"},
+  {0x52, "Received ERR_FATAL Message"},
+  {0x59, "LER was triggered by ERR_NONFATAL"},
+  {0x5A, "LER was triggered by ERR_FATAL"},
+  {0xA0, "PERR (non-AER)"},
+  {0xA1, "SERR (non-AER)"},
+  {0xFF, "None"}
+};
 
 static int
 pal_key_index(char *key) {
@@ -302,8 +331,7 @@ pal_get_fru_id(char *str, uint8_t *fru) {
   bool found_id = false;
 
   for (fru_id = FRU_ALL; fru_id <= MAX_NUM_FRUS; fru_id++) {
-    if ((strncmp(str, fru_str_list[fru_id][0], MAX_FRU_CMD_STR) == 0) ||
-        (strncmp(str, fru_str_list[fru_id][1], MAX_FRU_CMD_STR) == 0)) {
+    if (strncmp(str, fru_str_list[fru_id], MAX_FRU_CMD_STR) == 0) {
       *fru = fru_id;
       found_id = true;
       break;
@@ -440,6 +468,7 @@ int
 pal_get_fru_capability(uint8_t fru, unsigned int *caps)
 {
   int ret = 0;
+  uint8_t chassis_type = 0;
   switch (fru) {
     case FRU_SERVER:
       *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL | FRU_CAPABILITY_POWER_ALL | FRU_CAPABILITY_POWER_12V_ALL | FRU_CAPABILITY_SERVER;
@@ -460,7 +489,11 @@ pal_get_fru_capability(uint8_t fru, unsigned int *caps)
       *caps = FRU_CAPABILITY_FRUID_READ | FRU_CAPABILITY_SENSOR_READ;
       break;
     case FRU_E1S_IOCM:
-      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+      *caps = FRU_CAPABILITY_SENSOR_ALL;
+      fbgc_common_get_chassis_type(&chassis_type);
+      if (chassis_type == CHASSIS_TYPE7) {
+        *caps |= FRU_CAPABILITY_FRUID_ALL;
+      }
       break;
     case FRU_FAN0:
     case FRU_FAN1:
@@ -512,7 +545,6 @@ pal_get_fan_name(uint8_t fan_id, char *name) {
 
 int
 pal_get_fru_name(uint8_t fru, char *name) {
-  uint8_t type = 0;
 
   switch(fru) {
     case FRU_SERVER:
@@ -534,12 +566,7 @@ pal_get_fru_name(uint8_t fru, char *name) {
       snprintf(name, MAX_FRU_CMD_STR, "nic");
       break;
     case FRU_E1S_IOCM:
-      fbgc_common_get_chassis_type(&type);
-      if (type == CHASSIS_TYPE7) {
-        snprintf(name, MAX_FRU_CMD_STR, "iocm");
-      } else {
-        snprintf(name, MAX_FRU_CMD_STR, "e1s");
-      }
+      snprintf(name, MAX_FRU_CMD_STR, "e1s_iocm");
       break;
    case FRU_FAN0:
       snprintf(name, MAX_FRU_CMD_STR, "fan0");
@@ -848,7 +875,7 @@ pal_set_status_led(uint8_t fru, status_led_color color) {
     val_blue   = GPIO_VALUE_LOW;
     break;
   case STATUS_LED_BLUE:
-    val_yellow = GPIO_VALUE_LOW;
+    val_yellow = GPIO_VALUE_HIGH;
     val_blue   = GPIO_VALUE_HIGH;
     break;
   case STATUS_LED_YELLOW:
@@ -1077,88 +1104,102 @@ int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, u
 
 int
 pal_add_i2c_device(uint8_t bus, uint8_t addr, char *device_name) {
-  int ret = -1;
+  int ret = 0;
   char cmd[MAX_PATH_LEN] = {0};
+  char path[MAX_PATH_LEN] = {0};
+  FILE *fp = NULL;
 
   if (device_name == NULL) {
     syslog(LOG_ERR, "%s device name is null", __func__);
     return -1;
   }
 
-  snprintf(cmd, sizeof(cmd),
-            "echo %s %d > /sys/class/i2c-dev/i2c-%d/device/new_device",
-              device_name, addr, bus);
+  snprintf(path, sizeof(path), "/sys/class/i2c-dev/i2c-%d/device/new_device", bus);
+  fp = fopen(path, "w");
+  if(fp == NULL) {
+    syslog(LOG_ERR, "%s Failed to open file: %s. %s", __func__, path, strerror(errno));
+    return -1;
+  }
 
-#if DEBUG
-  syslog(LOG_WARNING, "%s Cmd: %s", __func__, cmd);
-#endif
+  snprintf(cmd, sizeof(cmd), "%s %d",device_name, addr);
+  if (fwrite(cmd, sizeof(char), strlen(cmd), fp) != strlen(cmd)) {
+    syslog(LOG_ERR, "%s Failed to write file: %s. %s", __func__, path, strerror(errno));
+    ret = -1;
+  }
 
-  ret = run_command(cmd);
+  fclose(fp);
 
   return ret;
 }
 
 int
 pal_del_i2c_device(uint8_t bus, uint8_t addr) {
-  int ret = -1;
+  int ret = 0;
   char cmd[MAX_PATH_LEN] = {0};
+  char path[MAX_PATH_LEN] = {0};
+  FILE *fp = NULL;
 
-  snprintf(cmd, sizeof(cmd), "echo %d > /sys/class/i2c-dev/i2c-%d/device/delete_device",
-           addr, bus);
+  snprintf(path, sizeof(path), "/sys/class/i2c-dev/i2c-%d/device/delete_device", bus);
+  fp = fopen(path, "w");
+  if(fp == NULL) {
+    syslog(LOG_ERR, "%s Failed to open file: %s. %s", __func__, path, strerror(errno));
+    return -1;
+  }
 
-#if DEBUG
-  syslog(LOG_WARNING, "%s Cmd: %s", __func__, cmd);
-#endif
+  snprintf(cmd, sizeof(cmd), "%d", addr);
+  if (fwrite(cmd, sizeof(char), strlen(cmd), fp) != strlen(cmd)) {
+    syslog(LOG_ERR, "%s Failed to write file: %s. %s", __func__, path, strerror(errno));
+    ret = -1;
+  }
 
-  ret = run_command(cmd);
+  fclose(fp);
+
+  return ret;
+}
+
+static int
+i2c_device_binding_operation(uint8_t bus, uint8_t addr, char *driver_name, uint8_t operation) {
+  int ret = 0;
+  char cmd[MAX_PATH_LEN] = {0};
+  char path[MAX_PATH_LEN] = {0};
+  FILE *fp = NULL;
+
+  if (driver_name == NULL) {
+    syslog(LOG_ERR, "%s driver name is null", __func__);
+    return -1;
+  }
+
+  if (operation == BIND) {
+    snprintf(path, sizeof(path), "/sys/bus/i2c/drivers/%s/bind", driver_name);
+  } else {
+    snprintf(path, sizeof(path), "/sys/bus/i2c/drivers/%s/unbind", driver_name);
+  }
+
+  fp = fopen(path, "w");
+  if(fp == NULL) {
+    syslog(LOG_ERR, "%s Failed to open file: %s. %s", __func__, path, strerror(errno));
+    return -1;
+  }
+
+  snprintf(cmd, sizeof(cmd), "%d-00%d", bus, addr);
+  if (fwrite(cmd, sizeof(char), strlen(cmd), fp) != strlen(cmd)) {
+    syslog(LOG_ERR, "%s Failed to write file: %s. %s", __func__, path, strerror(errno));
+    ret = -1;
+  }
+
+  fclose(fp);
 
   return ret;
 }
 
 int
 pal_bind_i2c_device(uint8_t bus, uint8_t addr, char *driver_name) {
-  int ret = -1;
-  char cmd[MAX_PATH_LEN] = {0};
-
-  if (driver_name == NULL) {
-    syslog(LOG_ERR, "%s driver name is null", __func__);
-    return -1;
-  }
-
-  snprintf(cmd, sizeof(cmd),
-            "echo %d-00%d > /sys/bus/i2c/drivers/%s/bind",
-              bus, addr, driver_name);
-
-#if DEBUG
-  syslog(LOG_WARNING, "%s Cmd: %s", __func__, cmd);
-#endif
-
-  ret = run_command(cmd);
-
-  return ret;
+  return i2c_device_binding_operation(bus, addr, driver_name, BIND);
 }
 
 int
 pal_unbind_i2c_device(uint8_t bus, uint8_t addr, char *driver_name) {
-  int ret = -1;
-  char cmd[MAX_PATH_LEN] = {0};
-
-  if (driver_name == NULL) {
-    syslog(LOG_ERR, "%s driver name is null", __func__);
-    return -1;
-  }
-
-  snprintf(cmd, sizeof(cmd),
-            "echo %d-00%d > /sys/bus/i2c/drivers/%s/unbind",
-              bus, addr, driver_name);
-
-#if DEBUG
-  syslog(LOG_WARNING, "%s Cmd: %s", __func__, cmd);
-#endif
-
-  ret = run_command(cmd);
-
-  return ret;
+  return i2c_device_binding_operation(bus, addr, driver_name, UNBIND);
 }
 
 // To get the platform sku
@@ -1479,9 +1520,9 @@ pal_specific_plat_fan_check(bool status)
   }
 
   if(chassis_status == CHASSIS_OUT) {
-    printf("Chassis Fan Latch Open: True\n");
+    printf("Sled Fan Latch Open: True\n");
   } else {
-    printf("Chassis Fan Latch Open: False\n");
+    printf("Sled Fan Latch Open: False\n");
   }
 
   return;
@@ -2065,48 +2106,112 @@ pal_i2c_crash_deassert_handle(int i2c_bus_num) {
   }
 }
 
+static int
+set_exp_uart_bridging(uint8_t bridging_status) {
+  uint8_t bmc_rev_id = 0;
+  uint32_t reg_value = 0, hicr9_value = 0, hicra_value = 0;
+  exp_uart_bridging_cmd cmd = {0};
+  int fd = 0, retry = 0, ret = CC_SUCCESS;
+  bool is_ctrl_via_fpga = false;
+  char uic_fpga_ver[MAX_VALUE_LEN] = {0};
+  char uic_fpga_stage[MAX_VALUE_LEN] = {0};
+  char uic_fpga_ver_num[MAX_VALUE_LEN] = {0};
+
+  switch (bridging_status) {
+    case ENABLE_BRIDGING:
+      hicr9_value = ROUTE_IO2_TO_IO6;
+      hicra_value = ROUTE_IO6_TO_IO2;
+      break;
+    case DISABLE_BRIDGING:
+      hicr9_value = ROUTE_UART6_TO_IO6;
+      hicra_value = ROUTE_UART2_TO_IO2;
+      break;
+    default:
+      syslog(LOG_WARNING, "%s: failed to route UART due to wrong status", __func__);
+      return CC_INVALID_PARAM;
+  }
+
+  // Get BMC Revision ID
+  phymem_get_dword(SCU_BASE, REG_SCU014, &reg_value);
+  bmc_rev_id = (reg_value >> OFFSET_BMC_REV_ID) & 0xf;
+
+  // Get UIC FPGA firmware version
+  if (pal_get_fpga_ver_cache(I2C_UIC_FPGA_BUS, GET_FPGA_VER_ADDR, uic_fpga_ver) == 0) {
+    snprintf(uic_fpga_stage, sizeof(uic_fpga_stage), "%c%c", uic_fpga_ver[4], uic_fpga_ver[5]);
+    snprintf(uic_fpga_ver_num, sizeof(uic_fpga_ver_num), "%c%c", uic_fpga_ver[6], uic_fpga_ver[7]);
+
+    // Support to route in UIC FPGA with firmware version D04
+    if (((strcmp(uic_fpga_stage, "0D") == 0) && (atoi(uic_fpga_ver_num) >= 0x04))
+      || (strcmp(uic_fpga_stage, "0A") == 0)) {
+      is_ctrl_via_fpga = true;
+    }
+  } else {
+    syslog(LOG_WARNING, "%s: failed to route UART because failed to get UIC FPGA firmware version", __func__);
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  if (bmc_rev_id < ASPEED_A2) {
+    // Routing by BMC. Not support routing with UART6/IO6 after A2 silicon
+    // set HICR9 register
+    if (phymem_set_dword(LPC_CTR_BASE, HICR9_ADDR, hicr9_value) < 0) {
+      syslog(LOG_WARNING, "%s: failed to route UART by setting HICR9 with 0x%X", __func__, hicr9_value);
+      return CC_UNSPECIFIED_ERROR;
+    }
+
+    // set HICRA register
+    if (phymem_set_dword(LPC_CTR_BASE, HICRA_ADDR, hicra_value) < 0) {
+      syslog(LOG_WARNING, "%s: failed to route UART by setting HICRA with 0x%X", __func__, hicra_value);
+      return CC_UNSPECIFIED_ERROR;
+    }
+  } else {
+    // Routing by FGPA
+    if (is_ctrl_via_fpga == false) {
+      syslog(LOG_ERR, "%s: failed to route UART by UIC FPGA because firmware version is too old, please update.", __func__);
+      return CC_NOT_SUPP_IN_CURR_STATE;
+    }
+
+    cmd.exp_uart_bridging_cmd_code = UIC_FPGA_UART_BRIDGING_OFFSET;
+    cmd.exp_uart_bridging_mode = bridging_status;
+
+    fd = i2c_cdev_slave_open(I2C_UIC_FPGA_BUS, UIC_FPGA_SLAVE_ADDR >> 1, I2C_SLAVE_FORCE_CLAIM);
+    if (fd < 0) {
+      syslog(LOG_WARNING, "%s() Failed to open i2c bus %d", __func__, I2C_UIC_FPGA_BUS);
+      return CC_UNSPECIFIED_ERROR;
+    }
+
+    while (retry < MAX_RETRY) {
+      ret = i2c_rdwr_msg_transfer(fd, UIC_FPGA_SLAVE_ADDR, (uint8_t *)&cmd, sizeof(cmd), NULL, 0);
+      if (ret < 0) {
+        retry++;
+        msleep(100);
+      } else {
+        break;
+      }
+    }
+
+    if (retry == MAX_RETRY) {
+      syslog(LOG_WARNING, "%s() Failed to send \"set exander UART briding\" command to UIC FPGA", __func__);
+      ret = CC_UNSPECIFIED_ERROR;
+    }
+  }
+
+  if (fd >= 0) {
+    close(fd);
+  }
+
+  return ret;
+}
+
 int
 pal_setup_exp_uart_bridging(void) {
 
-  uint32_t reg_value = 0;
-
-  // set HICR9 register to route IO2 to IO6
-  reg_value = ROUTE_IO2_TO_IO6;
-  if (phymem_set_dword(LPC_CTR_BASE, HICR9_ADDR, reg_value) < 0) {
-    syslog(LOG_WARNING, "%s: failed to route IO2 to IO6", __func__);
-    return CC_UNSPECIFIED_ERROR;
-  }
-
-  // set HICRA register to route IO6 to IO2
-  reg_value = ROUTE_IO6_TO_IO2;
-  if (phymem_set_dword(LPC_CTR_BASE, HICRA_ADDR, reg_value) < 0) {
-    syslog(LOG_WARNING, "%s: failed to route IO6 to IO2", __func__);
-    return CC_UNSPECIFIED_ERROR;
-  }
-
-  return CC_SUCCESS;
+  return set_exp_uart_bridging(ENABLE_BRIDGING);
 }
 
 int
 pal_teardown_exp_uart_bridging(void) {
 
-  uint32_t reg_value = 0;
-
-  // set HICR9 register to default (route UART6 to IO6)
-  reg_value = ROUTE_UART6_TO_IO6;
-  if (phymem_set_dword(LPC_CTR_BASE, HICR9_ADDR, reg_value) < 0) {
-    syslog(LOG_WARNING, "%s: failed to route UART6 to IO6", __func__);
-    return CC_UNSPECIFIED_ERROR;
-  }
-
-  // set HICRA register to default (route UART2 to IO2)
-  reg_value = ROUTE_UART2_TO_IO2;
-  if (phymem_set_dword(LPC_CTR_BASE, HICRA_ADDR, reg_value) < 0) {
-    syslog(LOG_WARNING, "%s: failed to route UART2 to IO2", __func__);
-    return CC_UNSPECIFIED_ERROR;
-  }
-
-  return CC_SUCCESS;
+  return set_exp_uart_bridging(DISABLE_BRIDGING);
 }
 
 int
@@ -2245,22 +2350,28 @@ pal_is_crashdump_ongoing(uint8_t fru)
 // Determine if BMC is AC on
 int
 pal_is_bmc_por(void) {
+  int ret = 0;
   char ast_por_flag[MAX_VALUE_LEN] = {0x0};
   char ast_por_true[] = "1";
-  uint32_t reg_value = 0;
+  uint32_t reg_value = 0, sig = 0;
 
   if (kv_get("ast_por_flag", ast_por_flag, NULL, 0) < 0) {
-    // Check External reset EXTRST# event log (SCU074[1]) to to determine if this boot is AC on or not
+    // Read Boot Magic
+    phymem_get_dword(SRAM_BMC_REBOOT_BASE, BOOT_MAGIC_OFFSET, &sig);
+    // Check Power on reset SRST# event log (SCU074[0]) to determine if this boot is AC on or not
     phymem_get_dword(SCU_BASE, REG_SCU074, &reg_value);
-    if ((reg_value & OFFSET_EXTRST_EVENT_LOG) == 0) {
+    if ((sig != BOOT_MAGIC) && ((reg_value & OFFSET_SRST_EVENT_LOG) == 1)) {
       // Power ON Reset
       kv_set("ast_por_flag", STR_VALUE_1, 0, 0);
-      return 1;
+      ret = 1;
     } else {
       // External Reset
       kv_set("ast_por_flag", STR_VALUE_0, 0, 0);
-      return 0;
+      ret = 0;
     }
+    // Clear SCU074
+    phymem_set_dword(SCU_BASE, REG_SCU074, 0xffffffff);
+    return ret;
   }
 
   if (strncmp(ast_por_flag, ast_por_true, strlen(ast_por_true)) == 0) {
@@ -2308,6 +2419,7 @@ pal_bic_sel_handler(uint8_t snr_num, uint8_t *event_data) {
   char key[MAX_KEY_LEN] = {0};
   char val[MAX_VALUE_LEN] = {0};
   uint8_t event_dir = EVENT_DEASSERT;
+  int sel_error_record = 0, sel_event_error_record = 0;
 
   if (event_data == NULL) {
     syslog(LOG_ERR, "%s(): Failed to handle BIC sel because event data is NULL", __func__);
@@ -2316,8 +2428,6 @@ pal_bic_sel_handler(uint8_t snr_num, uint8_t *event_data) {
 
   // Event Dir is used to check the assertion of event. Refer to IPMI v2.0 Section 32.1.
   event_dir = event_data[2] & 0x80;
-  memset(key, 0, sizeof(key));
-  snprintf(key, sizeof(key), "server_sel_error");
 
   switch (snr_num) {
     case CATERR_B:
@@ -2333,13 +2443,31 @@ pal_bic_sel_handler(uint8_t snr_num, uint8_t *event_data) {
   }
 
   if (is_err_server_sel == true) {
-    if ( event_dir == EVENT_ASSERT ) {
+    // Get and update SEL error record
+    snprintf(key, sizeof(key), "sel_error_record");
+    if (kv_get(key, val, NULL, 0) == 0) {
+      sel_error_record = atoi(val);
+    }
+    
+    if (event_dir == EVENT_ASSERT) {
       sel_error_record++;
     } else {
       sel_error_record--;
     }
+    
+    snprintf(val, sizeof(val), "%d", sel_error_record);
+    kv_set(key, val, 0, 0);
 
-    if (sel_error_record > 0) {
+
+    // Get SEL event error record
+    snprintf(key, sizeof(key), "sel_event_error_record");
+    if (kv_get(key, val, NULL, 0) == 0) {
+      sel_event_error_record = atoi(val);
+    }
+
+    // Update server_sel_error
+    snprintf(key, sizeof(key), "server_sel_error");
+    if ((sel_error_record > 0) || (sel_event_error_record > 0)) {
       snprintf(val, sizeof(val), "%d", FRU_STATUS_BAD);
     } else {
       snprintf(val, sizeof(val), "%d", FRU_STATUS_GOOD);
@@ -2380,19 +2508,32 @@ int
 pal_oem_unified_sel_handler(uint8_t fru, uint8_t general_info, uint8_t *sel) {
   char key[MAX_KEY_LEN] = {0};
   char val[MAX_VALUE_LEN] = {0};
+  int sel_event_error_record = 0;
 
   if (sel == NULL) {
     syslog(LOG_ERR, "%s(): Failed to handle OEM unified sel due to NULL parameter.", __func__);
     return PAL_ENOTREADY;
   }
+  
+  // Update SEL event error record
+  snprintf(key, sizeof(key), "sel_event_error_record");
+  if (kv_get(key, val, NULL, 0) == 0) {
+    sel_event_error_record = atoi(val);
+  }
+  
+  sel_event_error_record++;
+  
+  snprintf(val, sizeof(val), "%d", sel_event_error_record);
+  if (kv_set(key, val, 0, 0) < 0) {
+    syslog(LOG_ERR, "%s(): Failed to handle OEM unified sel due to pal_set_key_value failed. key: %s", __func__, key);
+    return PAL_ENOTREADY;
+  }
 
+  // Update server_sel_error
   memset(key, 0, sizeof(key));
   memset(val, 0, sizeof(val));
-
   snprintf(key, sizeof(key), "server_sel_error");
   snprintf(val, sizeof(val), "%d", FRU_STATUS_BAD);
-
-  sel_error_record++;
 
   if (pal_set_key_value(key, val) < 0) {
     syslog(LOG_ERR, "%s(): Failed to handle OEM unified sel because failed set key value of %s.", __func__, key);
@@ -2493,11 +2634,10 @@ pal_set_sensor_health(uint8_t fru, uint8_t value) {
       snprintf(key, sizeof(key), "uic_sensor_health");
       break;
     case FRU_DPB:
-      snprintf(key, sizeof(key), "dpb_sensor_health");
-      break;
     case FRU_SCC:
-      snprintf(key, sizeof(key), "scc_sensor_health");
-      break;
+      // SCC and DPB sensor event SEL are sent by Expander
+      // health value will change when get SEL
+      return 0;
     case FRU_NIC:
       snprintf(key, sizeof(key), "nic_sensor_health");
       break;
@@ -2544,7 +2684,8 @@ pal_log_clear(char *fru) {
     if (ret < 0) {
       syslog(LOG_ERR, "%s(): failed to clear server sel error value", __func__);
     }
-    sel_error_record = 0;
+    kv_set("sel_error_record", STR_VALUE_0, 0, 0);
+    kv_set("sel_event_error_record", STR_VALUE_0, 0, 0);
 
   } else if (strcmp(fru, "uic") == 0) {
     ret = pal_set_key_value("uic_sensor_health", val);
@@ -2570,7 +2711,7 @@ pal_log_clear(char *fru) {
       syslog(LOG_ERR, "%s(): failed to clear the nic seneor health value", __func__);
     }
 
-  } else if ((strcmp(fru, "iocm") == 0) || (strcmp(fru, "e1s_iocm") == 0)) {
+  } else if (strcmp(fru, "e1s_iocm") == 0) {
     ret = pal_set_key_value("e1s_iocm_sensor_health", val);
     if (ret < 0) {
       syslog(LOG_ERR, "%s(): failed to clear the e1s/ iocm seneor health value", __func__);
@@ -2586,7 +2727,8 @@ pal_log_clear(char *fru) {
     if (ret < 0) {
       syslog(LOG_ERR, "%s(): failed to clear server sel error value", __func__);
     }
-    sel_error_record = 0;
+    kv_set("sel_error_record", STR_VALUE_0, 0, 0);
+    kv_set("sel_event_error_record", STR_VALUE_0, 0, 0);
 
     ret = pal_set_key_value("uic_sensor_health", val);
     if (ret < 0) {
@@ -2621,6 +2763,14 @@ pal_log_clear(char *fru) {
     ret = pal_set_key_value("heartbeat_health", val);
     if (ret < 0) {
       syslog(LOG_ERR, "%s(): failed to clear heartbeat health value", __func__);
+    }
+    ret = kv_set("fan_dead_rearm", "1", 0, 1);
+    if (ret < 0) {
+      syslog(LOG_ERR, "%s(): failed to set fan dead re-arm value, err: %s", __func__, strerror(errno));
+    }
+    ret = kv_set("healthd_rearm", "1", 0, 0);
+    if (ret < 0) {
+      syslog(LOG_ERR, "%s(): failed to set healthd re-arm value, err: %s", __func__, strerror(errno));
     }
   }
 }
@@ -2758,19 +2908,41 @@ pal_handle_oem_1s_asd_msg_in(uint8_t fru, uint8_t *data, uint8_t data_len)
 }
 
 static int
-pal_get_custom_event_sensor_name(uint8_t sensor_num, char *name) {
+pal_get_custom_event_sensor_name(uint8_t fru, uint8_t sensor_num, char *name) {
   int ret = PAL_EOK;
 
   if (name == NULL) {
     syslog(LOG_ERR, "%s() sensor name is missing", __func__);
     return -1;
   }
-  switch(sensor_num) {
-    case BIC_SENSOR_VRHOT:
-      snprintf(name, MAX_SNR_NAME, "VR_HOT");
+  switch(fru) {
+    case FRU_SERVER:
+      switch(sensor_num) {
+        case BIC_SENSOR_VRHOT:
+          snprintf(name, MAX_SNR_NAME, "VR_HOT");
+          break;
+        case BIC_SENSOR_SYSTEM_STATUS:
+          snprintf(name, MAX_SNR_NAME, "SYSTEM_STATUS");
+          break;
+        case BIC_SENSOR_PROC_FAIL:
+          snprintf(name, MAX_SNR_NAME, "PROC_FAIL");
+          break;
+        default:
+          snprintf(name, MAX_SNR_NAME, "Unknown");
+          ret = PAL_ENOTSUP;
+          break;
+      }
       break;
-    case BIC_SENSOR_SYSTEM_STATUS:
-      snprintf(name, MAX_SNR_NAME, "SYSTEM_STATUS");
+    case FRU_SCC:
+      switch(sensor_num) {
+        case SCC_DRAWER:
+          snprintf(name, MAX_SNR_NAME, "Drawer");
+          break;
+        default:
+          snprintf(name, MAX_SNR_NAME, "Unknown");
+          ret = PAL_ENOTSUP;
+          break;
+      }
       break;
     default:
       snprintf(name, MAX_SNR_NAME, "Unknown");
@@ -2779,6 +2951,29 @@ pal_get_custom_event_sensor_name(uint8_t sensor_num, char *name) {
   }
 
   return ret;
+}
+
+static int
+pal_parse_proc_fail(uint8_t *event_data, char *error_log) {
+  enum {
+    FRB3 = 0x04,
+  };
+
+  if (event_data == NULL || error_log == NULL) {
+    syslog(LOG_WARNING, "%s(): NULL parameter", __func__);
+    return -1;
+  }
+
+  switch(event_data[0]) {
+    case FRB3:
+      strcat(error_log, "FRB3, ");
+      break;
+    default:
+      strcat(error_log, "Undefined data, ");
+      break;
+  }
+
+  return PAL_EOK;
 }
 
 int
@@ -2802,7 +2997,7 @@ pal_get_event_sensor_name(uint8_t fru, uint8_t *sel, char *name) {
       snprintf(name, MAX_SNR_NAME, "OS");
       return PAL_EOK;
     default:
-      if (pal_get_custom_event_sensor_name(snr_num, name) == PAL_EOK ) {
+      if (pal_get_custom_event_sensor_name(fru, snr_num, name) == PAL_EOK ) {
         return PAL_EOK;
       }
       break;
@@ -2920,6 +3115,8 @@ pal_parse_sys_sts_event(uint8_t *event_data, char *error_log) {
 
 int
 pal_parse_sel(uint8_t fru, uint8_t *sel, char *error_log) {
+  bool is_parsed = false;
+
   if (sel == NULL) {
     syslog(LOG_ERR, "%s() SEL is missing", __func__);
     return -1;
@@ -2932,28 +3129,81 @@ pal_parse_sel(uint8_t fru, uint8_t *sel, char *error_log) {
   enum {
     EVENT_TYPE_NOTIF = 0x77, /*IPMI-Table 42-1, Event/Reading Type Code Ranges - OEM specific*/
   };
+  uint8_t snr_type = sel[SEL_SNR_TYPE];
   uint8_t snr_num = sel[SEL_SNR_NUM];
   uint8_t event_dir = sel[SEL_EVENT_TYPE] & 0x80;
   uint8_t event_type = sel[SEL_EVENT_TYPE] & 0x7f;
   uint8_t *event_data = &sel[SEL_EVENT_DATA];
 
   error_log[0] = '\0';
-  switch (snr_num) {
-    case BIC_SENSOR_VRHOT:
-      pal_parse_vr_event(event_data, error_log);
+  switch (fru) {
+    case FRU_SERVER:
+      switch (snr_num) {
+        case BIC_SENSOR_VRHOT:
+          pal_parse_vr_event(event_data, error_log);
+          is_parsed = true;
+          break;
+        case BIC_SENSOR_SYSTEM_STATUS:
+          pal_parse_sys_sts_event(event_data, error_log);
+          is_parsed = true;
+          break;
+        case BIC_SENSOR_PROC_FAIL:
+          pal_parse_proc_fail(event_data, error_log);
+          is_parsed = true;
+          break;
+        default:
+          break;
+      }
+      if (is_parsed == true) {
+        if (event_type == EVENT_TYPE_NOTIF) {
+          strcat(error_log, " Triggered");
+        } else {
+          strcat(error_log, ((event_dir & 0x80) == 0)?" Assertion":" Deassertion");
+        }
+      }
       break;
-    case BIC_SENSOR_SYSTEM_STATUS:
-      pal_parse_sys_sts_event(event_data, error_log);
+
+    case FRU_SCC:
+      switch (event_type) {
+        case SENSOR_SPECIFIC:
+          switch (snr_type) {
+            case PHYSICAL_SECURITY:
+              switch (event_data[0] & 0x0F) {
+                //Sensor Type Code: Physical Security 0x5h, SENSOR_SPECIFIC Offset 0x0h, General Chassis Intrusion: 0x0h
+                case GENERAL_CHASSIS_INTRUSION:
+                  is_parsed = true;
+                  if (event_dir == 0) {
+                    strcat(error_log, "Drawer be Pulled Out");
+                  } else {
+                    strcat(error_log, "Drawer be Pushed Back");
+                  }
+                  break;
+                default:
+                  break;
+              }
+              break;
+            default:
+              break;
+          }
+          break;
+        case GENERIC:
+          is_parsed = true;
+          if ((event_data[0] & 0x0F) == 0x00) {
+            strcat(error_log, "ASSERT, Limit Exceeded");
+          } else {
+            strcat(error_log, "DEASSERT, Limit Not Exceeded");
+          }
+          break;
+        default:
+          break;
+      }
       break;
     default:
-      pal_parse_sel_helper(fru, sel, error_log);
-      return PAL_EOK;
+      break;
   }
 
-  if (event_type == EVENT_TYPE_NOTIF) {
-    strcat(error_log, " Triggered");
-  } else {
-    strcat(error_log, ((event_dir & 0x80) == 0)?" Assertion":" Deassertion");
+  if (is_parsed == false) {
+    pal_parse_sel_helper(fru, sel, error_log);
   }
 
   return PAL_EOK;
@@ -3219,4 +3469,581 @@ pal_get_ioc_wwid(uint8_t ioc_component, uint8_t *res_data, uint8_t *res_len)
   memcpy(res_data, ioc_wwid_res, sizeof(ioc_wwid_res));
 
   return CC_SUCCESS;
+}
+
+bool
+pal_is_ioc_ready(uint8_t i2c_bus) {
+  uint8_t bios_post_cmplt = 0;
+  uint8_t server_status = 0, fru_present_flag = 0;
+  gpio_value_t scc_pwr_status = 0;
+  bic_gpio_t gpio = {0};
+
+  // Check server power status
+  if (pal_get_server_power(FRU_SERVER, &server_status) < 0){
+    syslog(LOG_WARNING, "%s(): Failed to check IOC is ready because failed to get server power status.", __func__);
+    return false;
+  }
+  if (server_status != SERVER_POWER_ON) {
+    return false;
+  }
+
+  if (i2c_bus == I2C_T5IOC_BUS) {
+    // Check SCC present
+    if (pal_is_fru_prsnt(FRU_SCC, &fru_present_flag) < 0) {
+      syslog(LOG_WARNING, "%s() Failed to check SCC IOC is ready because failed to get SCC present status.", __func__);
+      return false;
+    }
+    if (fru_present_flag != FRU_PRESENT) {
+      return false;
+    }
+    // Check SCC power status
+    scc_pwr_status = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_SCC_STBY_PWR_EN));
+    if (scc_pwr_status == GPIO_VALUE_INVALID) {
+      syslog(LOG_WARNING, "%s(): Failed to check SCC IOC is ready because failed to get SCC power status.", __func__);
+      return false;
+    } else if (scc_pwr_status == GPIO_VALUE_LOW) {
+      return false;
+    }
+  } else if (i2c_bus == I2C_T5E1S0_T7IOC_BUS) {
+    // Check IOCM IOC present
+    if (is_e1s_iocm_present(T5_E1S0_T7_IOC_AVENGER) == false) {
+      return false;
+    }
+  } else {
+    syslog(LOG_WARNING, "%s() Failed to check IOC is ready due to unknown i2c bus: %d", __func__, i2c_bus);
+    return false;
+  }
+
+  // Check BIOS is completed via BIC
+  if (bic_get_gpio(&gpio) < 0) {
+    syslog(LOG_WARNING, "%s() Failed to get value of BIOS complete pin via BIC", __func__);
+    return false;
+  }
+
+  bios_post_cmplt = ((((uint8_t*)&gpio)[BIOS_POST_CMPLT/8]) >> (BIOS_POST_CMPLT % 8)) & 0x1;
+  if (bios_post_cmplt != GPIO_VALUE_LOW) {
+    return false;
+  }
+
+  return true;
+}
+
+int
+pal_check_fru_is_valid(const char* fruid_path) {
+
+  if (fruid_path == NULL) {
+    syslog(LOG_ERR, "%s: Failed to check FRU header is valid or not because NULL parameter.", __func__);
+    return -1;
+  }
+
+  return fbgc_check_fru_is_valid(fruid_path);
+}
+
+int
+pal_devnum_to_fruid(int devnum) {
+  return FRU_SERVER;
+}
+
+// Get non-persistent key value
+int
+pal_get_cached_value(char *key, char *value) {
+  int i = 0;
+  int ret = 0;
+
+  if ((key == NULL) || (value == NULL)) {
+    syslog(LOG_ERR, "%s, Failed to read cached key value due to NULL parameter", __func__);
+    return -1;
+  }
+
+  for (i = 0; i < MAX_RETRY; i++) {
+    ret = 0;
+    ret = kv_get(key, value, NULL, 0);
+    if (ret != 0) {
+      syslog(LOG_ERR, "%s, failed to read cached key value (%s), ret: %d, retry: %d", __func__, key, ret, i);
+    }
+    else {
+      break;
+    }
+    msleep(100);
+  }
+
+  return ret;
+}
+
+// Set non-persistent key value
+int
+pal_set_cached_value(char *key, char *value) {
+  int i = 0;
+  int ret = 0;
+
+  if ((key == NULL) || (value == NULL)) {
+    syslog(LOG_ERR, "%s, Failed to write cached key value due to NULL parameter", __func__);
+    return -1;
+  }
+
+  for (i = 0; i < MAX_RETRY; i++) {
+    ret = 0;
+    ret = kv_set(key, value, 0, 0);
+    if (ret != 0) {
+      syslog(LOG_ERR, "%s, failed to write cached key value (%s), ret: %d, retry: %d", __func__, key, ret, i);
+    }
+    else {
+      break;
+    }
+    msleep(100);
+  }
+
+  return ret;
+}
+
+int
+pal_handle_dcmi(uint8_t fru, uint8_t *request, uint8_t req_len, uint8_t *response, uint8_t *rlen) {
+  int ret = 0;
+  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
+  uint8_t len = 0;
+
+  if ((request == NULL) || (response == NULL) || (rlen == NULL)) {
+    syslog(LOG_ERR, "%s: Failed to handle DCMI command because the parameters are NULL.", __func__);
+    return -1;
+  }
+
+  memset(&rbuf, 0, sizeof(rbuf));
+
+  ret = bic_me_xmit(request, req_len, rbuf, &len);
+  if ((ret != 0) || (len < 1)) {
+    return -1;
+  }
+
+  *rlen = len;
+  memcpy(response, &rbuf[0], *rlen);
+
+  return 0;
+}
+
+int
+pal_handle_string_sel(char *log, uint8_t log_len)
+{
+  char val[MAX_VALUE_LEN] = {0};
+  char key[MAX_KEY_LEN] = {0};
+  int ret = 0, i = 0;
+  uint8_t fru = 0;
+  static uint8_t sensor_event_record_list[2] = {0};
+  uint8_t fru_list[2] = {FRU_SCC, FRU_DPB};
+
+  if (log == NULL) {
+    syslog(LOG_ERR, "%s: Failed to check SCC/DPB sensor SEL", __func__);
+    return -1;
+  }
+
+  if ((strstr(log, "DPB_") != NULL) || (strstr(log, "HDD_") != NULL)
+       || (strstr(log, "FAN_") != NULL) || (strstr(log, "AIRFLOW") != NULL)) {
+    fru = FRU_DPB;
+    snprintf(key, sizeof(key), "dpb_sensor_health");
+  } else if (strstr(log, "SCC_") != NULL) {
+    fru = FRU_SCC;
+    snprintf(key, sizeof(key), "scc_sensor_health");
+  } else {
+    return ret;
+  }
+
+  for (i = 0; i < sizeof(fru_list); i++) {
+    if (fru == fru_list[i]) {
+      // Check assert/deassert
+      if (strstr(log, "DEASSERT") != NULL) {
+        sensor_event_record_list[i]--;
+      } else if (strstr(log, "ASSERT") != NULL) {
+        sensor_event_record_list[i]++;
+      } else {
+        return ret;
+      }
+
+      // Modify health value
+      if (sensor_event_record_list[i] == 0) {
+        snprintf(val, sizeof(val), "%d", FRU_STATUS_GOOD);
+      } else {
+        snprintf(val, sizeof(val), "%d", FRU_STATUS_BAD);
+      }
+    }
+  }
+
+  ret = pal_set_key_value(key, val);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s(): Failed to set key value of %s.", __func__, key);
+  }
+
+  return ret;
+}
+
+int
+pal_get_nm_selftest_result(uint8_t fruid, uint8_t *data) {
+  int ret = 0;
+  ipmi_req_t_common_header req = {0};
+  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
+  uint8_t rlen = 0;
+  me_xmit_res *res = (me_xmit_res *)rbuf;
+
+  req.netfn_lun = IPMI_NETFN_SHIFT(NETFN_APP_REQ);
+  req.cmd = CMD_APP_GET_SELFTEST_RESULTS;
+
+  ret = bic_me_xmit((uint8_t *)(&req), sizeof(ipmi_req_t_common_header), (uint8_t *)res, &rlen);
+
+  if (ret < 0 ) {
+    syslog(LOG_ERR, "%s: Failed to do ME self test because ME transmission failed", __func__);
+    return ret;
+  }
+
+  if ((rlen - 1) != SIZE_SELF_TEST_RESULT) {
+    syslog(LOG_ERR, "%s: Failed to do ME self test because the response size is wrong: %d, expected: %d", __func__, (rlen - 1), SIZE_SELF_TEST_RESULT);
+    return -1;
+  }
+
+  if (res->cc != CC_SUCCESS) {
+    syslog(LOG_ERR, "%s: Failed to do ME self test, Completion Code: %02X", __func__, res->cc);
+    return -1;
+  }
+
+  memcpy(data, res->data, (rlen - 1));
+
+  return 0;
+}
+
+int
+pal_get_fpga_ver_cache(uint8_t bus, uint8_t addr, char *ver_str) {
+  char key[MAX_KEY_LEN] = {0};
+
+  if (ver_str == NULL) {
+    syslog(LOG_WARNING, "Fail to get FPGA version cache because parameter *ver_str is NULL.");
+    return -1;
+  }
+
+  snprintf(key, sizeof(key), "fpga_bus%d_addr%02Xh_version", bus, addr);
+
+  if (kv_get(key, ver_str, NULL, 0) != 0) {
+    if (pal_set_fpga_ver_cache(bus, addr) != 0) {
+      return -1;
+    }
+  }
+
+  kv_get(key, ver_str, NULL, 0);
+
+  return 0;
+}
+
+int
+pal_set_fpga_ver_cache(uint8_t bus, uint8_t addr) {
+  uint32_t ver_reg = GET_FPGA_VER_OFFSET;
+  int i2cfd = 0, ret = 0;
+  uint8_t tbuf[MAX_FPGA_VER_LEN] = {0x00};
+  uint8_t rbuf[MAX_FPGA_VER_LEN] = {0x00};
+  uint8_t rlen = sizeof(rbuf), tlen = sizeof(tbuf);
+  char key[MAX_KEY_LEN] = {0};
+  char value[MAX_VALUE_LEN] = {0};
+
+  i2cfd = i2c_cdev_slave_open(bus, addr >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if (i2cfd < 0) {
+    syslog(LOG_ERR, "Failed to set FPGA version cache value due to I2C BUS: %d open failed.", bus);
+    return i2cfd;
+  }
+
+  if (ioctl(i2cfd, I2C_SLAVE, addr) < 0) {
+    syslog(LOG_ERR, "Failed to set FPGA version cache value due to talk to slave%02Xh failed.", addr);
+    ret = -1;
+  } else {
+    memcpy(tbuf, &ver_reg, tlen);
+
+    ret = i2c_rdwr_msg_transfer(i2cfd, addr << 1, tbuf, tlen, rbuf, rlen);
+    if (ret == 0) {
+      snprintf(key, sizeof(key), "fpga_bus%d_addr%02Xh_version", bus, addr);
+      snprintf(value, sizeof(value), "%02X%02X%02X%02X", rbuf[3], rbuf[2], rbuf[1], rbuf[0]);
+      kv_set(key, value, 0, 0);
+
+    } else {
+      syslog(LOG_ERR, "Fail to set FPGA version cache value due to i2c_rdwr_msg_transfer failed. bus: %d addr: %02Xh ret: %d", bus, addr, ret);
+    }
+  }
+
+  close(i2cfd);
+
+  return ret;
+}
+
+int pal_get_num_devs(uint8_t slot, uint8_t *num) {
+
+  if (num == NULL) {
+    syslog(LOG_ERR, "%s: Failed to get device num due to parameter *num is NULL", __func__);
+    return -1;
+  }
+  
+  *num = MAX_NUM_DEVS - 1;
+  
+  return 0;
+}
+
+int
+pal_get_dev_id(char *str, uint8_t *dev) {
+  
+  if ((str == NULL) || (dev == NULL)) {
+    syslog(LOG_ERR, "%s: Failed to get device id due to parameter is NULL", __func__);
+    return -1;
+  }
+  
+  return fbgc_common_dev_id(str, dev);
+}
+
+int
+pal_handle_oem_1s_dev_power(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
+  uint8_t dev_type = 0, dev_id = 0;
+  uint8_t chassis_type = 0;
+  int ret = 0;
+  char key[MAX_KEY_LEN] = {0};
+  char val[MAX_VALUE_LEN] = {0};
+  
+  if ((req_data == NULL) || (res_data == NULL) || (res_len == NULL)) {
+    syslog(LOG_WARNING, "%s: Failed to handle device power due to parameters are NULL.", __func__);
+    return CC_INVALID_PARAM;
+  }
+  
+  if ((req_len < 2) || (req_len > 3)) {
+    return CC_INVALID_LENGTH;
+  }
+  
+  ret = fbgc_common_get_chassis_type(&chassis_type);
+  if ((ret < 0) || (chassis_type != CHASSIS_TYPE5)) {
+    syslog(LOG_WARNING, "%s: Failed to handle device power due to only support Type5.", __func__);
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  dev_id = req_data[0];
+  if ((dev_id != T5_E1S0_T7_IOC_AVENGER) && (dev_id != T5_E1S1_T7_IOCM_VOLT)) {
+    syslog(LOG_ERR, "%s: Failed to handle device power due to wrong device id: %d.", __func__, dev_id);
+    return CC_PARAM_OUT_OF_RANGE;
+  }
+  
+  // Action: get device power
+  if ((req_data[1] == GET_DEV_POWER) && (req_len == 2)) {
+    
+    ret = pal_get_device_power(slot, dev_id + 1, &res_data[0], &dev_type);
+    if (ret < 0) {
+      syslog(LOG_WARNING, "%s: Failed to get device %d power", __func__, dev_id);
+      return CC_UNSPECIFIED_ERROR;
+    }
+    
+    *res_len = 1;
+  
+  // Action: set device power
+  } else if ((req_data[1] == SET_DEV_POWER) && (req_len == 3)) {
+    
+    if ((req_data[2] != DEVICE_POWER_ON) && (req_data[2] != DEVICE_POWER_OFF)) {
+      syslog(LOG_ERR, "%s: Failed to set device power due to wrong power status: 0x%02X.", __func__, req_data[2]);
+      return CC_UNSPECIFIED_ERROR; 
+    }
+    
+    ret = pal_set_dev_power_status(dev_id + 1, req_data[2]);
+    if (ret < 0) {
+      syslog(LOG_ERR, "%s: Failed to set device %d power.", __func__, dev_id);
+      return CC_UNSPECIFIED_ERROR;
+    }
+  
+  // Action: get device led
+  } else if ((req_data[1] == GET_DEV_LED) && (req_len == 2)) {
+    snprintf(key, sizeof(key), "e1s%d_led_status", dev_id);
+    
+    ret = kv_get(key, val, NULL, 0);
+    if (ret < 0) {
+      syslog(LOG_ERR, "%s: Failed to get device %d led status.", __func__, dev_id);
+      return CC_UNSPECIFIED_ERROR;
+    }
+    
+    if (strcmp(val, "on") == 0) {
+      res_data[0] = DEV_LED_ON;
+      
+    } else if (strcmp(val, "off") == 0) {
+      res_data[0] = DEV_LED_OFF;
+      
+    } else if (strcmp(val, "blinking") == 0) {
+      res_data[0] = DEV_LED_BLINKING;
+    }
+    
+    *res_len = 1;
+  
+  // Action: set device led
+  } else if ((req_data[1] == SET_DEV_LED) && (req_len == 3)) {
+    snprintf(key, sizeof(key), "e1s%d_led_status", dev_id);
+    
+    if (req_data[2] == DEV_LED_ON) {
+      snprintf(val, sizeof(val), "on");
+      
+    } else if (req_data[2] == DEV_LED_OFF) {
+      snprintf(val, sizeof(val), "off");
+      
+    } else if (req_data[2] == DEV_LED_BLINKING) {
+      snprintf(val, sizeof(val), "blinking");
+      
+    } else {
+      syslog(LOG_ERR, "%s: Failed to set device led status due to wrong led status: 0x%02X.", __func__, req_data[2]);
+      return CC_UNSPECIFIED_ERROR;
+    }
+    
+    ret = kv_set(key, val, 0, 0);
+    if (ret < 0) {
+      syslog(LOG_ERR, "%s: Failed to set device %d led status.", __func__, dev_id);
+      return CC_UNSPECIFIED_ERROR;
+    }
+  
+  // Action: get device present
+  } else if ((req_data[1] == GET_DEV_PRESENT) && (req_len == 2)) {
+
+    if (is_e1s_iocm_present(dev_id) == true) {
+      res_data[0] = FRU_PRESENT;
+    } else {
+      res_data[0] = FRU_ABSENT;
+    }
+
+    *res_len = 1;
+  
+  } else {
+    syslog(LOG_ERR, "%s: Failed to handle device: 0x%02X action: 0x%02X req_len: %d", __func__, dev_id, req_data[1], req_len);
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  return CC_SUCCESS;
+}
+
+int
+pal_clear_event_only_error_ack () {
+  int ret = 0;
+  char key[MAX_KEY_LEN] = {0};
+  char val[MAX_VALUE_LEN] = {0};
+  int sel_error_record = 0, sel_event_error_record = 0;
+  
+  // Clear SEL event error record  
+  snprintf(key, sizeof(key), "sel_event_error_record");
+  snprintf(val, sizeof(val), "%d", sel_event_error_record);
+  ret = kv_set(key, val, 0, 0);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s(): Failed to clear event only error record due to pal_set_key_value failed. key: %s", __func__, key);
+    return -1;
+  }
+  
+  // Get SEL error record
+  snprintf(key, sizeof(key), "sel_error_record");
+  if (kv_get(key, val, NULL, 0) == 0) {
+    sel_error_record = atoi(val);
+  }
+  
+  // Update server_sel_error
+  snprintf(key, sizeof(key), "server_sel_error");
+  if (sel_error_record > 0) {
+    snprintf(val, sizeof(val), "%d", FRU_STATUS_BAD);
+  } else {
+    snprintf(val, sizeof(val), "%d", FRU_STATUS_GOOD);
+  }
+  
+  ret = pal_set_key_value(key, val);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s(): Failed to update error record due to pal_set_key_value failed. key: %s", __func__, key);
+  }
+  
+  return ret;
+}
+
+static void
+pal_search_pcie_err(uint8_t err1_id, uint8_t err2_id, char **err1_desc, char **err2_desc, int *err1_size, int *err2_size) {
+  int i = 0;
+  int err_desc_size = 0;
+  int err_table_size = (sizeof(pcie_err_table) / sizeof(PCIE_ERR_DECODE));
+
+  for ( i = 0; i < err_table_size; i++ ) {
+    if ( err2_id == pcie_err_table[i].err_id ) {
+      err_desc_size = strlen(pcie_err_table[i].err_desc) + ERROR_ID_LOG_LEN + 2;
+      *err2_desc = calloc(err_desc_size, sizeof(char));
+      *err2_size = err_desc_size;
+      snprintf(*err2_desc, err_desc_size, ", ErrID2: 0x%02X(%s)",err2_id, pcie_err_table[i].err_desc);
+      continue;
+    } else if ( err1_id == pcie_err_table[i].err_id ) {
+      err_desc_size = strlen(pcie_err_table[i].err_desc) + ERROR_ID_LOG_LEN + 2;
+      *err1_desc = calloc(err_desc_size, sizeof(char));
+      *err1_size = err_desc_size;
+      snprintf(*err1_desc, err_desc_size, ", ErrID1: 0x%02X(%s)",err1_id, pcie_err_table[i].err_desc);
+      continue;
+    }
+
+    if ( *err1_desc != NULL && *err2_desc != NULL ) {
+      break;
+    }
+  }
+
+  if (*err2_desc == NULL) {
+    *err2_desc = calloc(ERROR_ID_LOG_LEN, sizeof(char));
+    *err2_size = ERROR_ID_LOG_LEN;
+    snprintf(*err2_desc, ERROR_ID_LOG_LEN, ", ErrID2: 0x%02X", err2_id);
+  }
+
+  if (*err1_desc == NULL) {
+    *err1_desc = calloc(ERROR_ID_LOG_LEN, sizeof(char));
+    *err1_size = ERROR_ID_LOG_LEN;
+    snprintf(*err1_desc, ERROR_ID_LOG_LEN, ", ErrID1: 0x%02X", err1_id);
+  }
+
+  return;
+}
+
+int
+pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log) {
+#define ERROR_LOG_LEN 256
+
+  uint8_t general_info = 0;
+  uint8_t error_type = 0;
+  uint8_t err_id1 = 0, err_id2 = 0;
+  uint8_t bus_id = 0, dev_id = 0, fun_id = 0;
+  uint16_t totalerrid1cnt = 0, err_info = 0;
+  uint8_t plat = 0;
+  char temp_log[ERROR_LOG_LEN/2] = {0};
+  char *err1_descript = NULL, *err2_descript = NULL;
+  int err1_size = 0, err2_size = 0;
+
+  if ((sel == NULL) || (error_log == NULL)) {
+    syslog(LOG_WARNING, "%s(): Failed to parse OEM unfied SEL due to NULL parameters.", __func__);
+    return PAL_ENOTSUP;
+  }
+
+  error_log[0] = '\0';
+  general_info = (uint8_t) sel[3];
+  error_type = general_info & 0x0f;
+  err_info = ((sel[9] << 8) | sel[8]);
+  dev_id = sel[10] >> 3;
+  fun_id = sel[10] & 0x7;
+  bus_id = sel[11];
+  totalerrid1cnt = ((sel[13] << 8) | sel[12]);
+  err_id2 = sel[14];
+  err_id1 = sel[15];
+
+  switch (error_type) {
+    case UNIFIED_PCIE_ERR:
+      plat = (general_info & 0x10) >> 4;
+      if (plat == 0) {  //x86
+        pal_search_pcie_err(err_id1, err_id2, &err1_descript, &err2_descript, &err1_size, &err2_size);
+        snprintf(error_log, ERROR_LOG_LEN, "GeneralInfo: x86/PCIeErr(0x%02X), Bus %02X/Dev %02X/Fun %02X, TotalErrID1Cnt: 0x%04X",
+                general_info, bus_id, dev_id, fun_id, totalerrid1cnt);
+        if (err2_descript != NULL) {
+          strncat(error_log, err2_descript, err2_size);
+          free(err2_descript);
+        }
+        if (err1_descript != NULL) {
+          strncat(error_log, err1_descript, err1_size);
+          free(err1_descript);
+        }
+      } else {
+        snprintf(error_log, ERROR_LOG_LEN, "GeneralInfo: ARM/PCIeErr(0x%02X), Aux. Info: 0x%04X, Bus %02X/Dev %02X/Fun %02X, TotalErrID1Cnt: 0x%04X, ErrID2: 0x%02X, ErrID1: 0x%02X",
+                general_info, err_info, bus_id, dev_id, fun_id, totalerrid1cnt, err_id2, err_id1);
+      }
+      snprintf(temp_log, sizeof(temp_log), "B %02X D %02X F %02X PCIe err,FRU:%u", bus_id, dev_id, fun_id, fru);
+      pal_add_cri_sel(temp_log);
+
+      return PAL_EOK;
+  }
+
+  pal_parse_oem_unified_sel_common(fru, sel, error_log);
+
+  return PAL_EOK;
 }

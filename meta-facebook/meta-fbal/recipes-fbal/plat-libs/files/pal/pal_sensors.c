@@ -58,8 +58,9 @@ static int read_cpu0_dimm_temp(uint8_t dimm_id, float *value);
 static int read_cpu1_dimm_temp(uint8_t dimm_id, float *value);
 static int read_cpu2_dimm_temp(uint8_t dimm_id, float *value);
 static int read_cpu3_dimm_temp(uint8_t dimm_id, float *value);
-static int read_NM_pch_temp(uint8_t nm_snr_id, float *value);
+static int read_NM_pch_temp(uint8_t nm_id, float *value);
 static int read_ina260_vol(uint8_t ina260_id, float *value);
+static int read_ina260_pwr(uint8_t ina260_id, float *value);
 static int read_vr_vout(uint8_t vr_id, float *value);
 static int read_vr_temp(uint8_t vr_id, float  *value);
 static int read_vr_iout(uint8_t vr_id, float  *value);
@@ -71,12 +72,6 @@ static int get_nm_rw_info(uint8_t nm_id, uint8_t* nm_bus, uint8_t* nm_addr, uint
 static uint8_t m_TjMax[CPU_ID_NUM] = {0};
 static float m_Dts[CPU_ID_NUM] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 static uint8_t postcodes_last[256] = {0};
-
-// For DEBUG card sensor naming config
-struct debug_card_naming_config {
-  uint8_t offset;
-  char debug_card_name[32];
-};
 
 //4S Master BMC Sensor List
 const uint8_t mb_4s_m_tray0_sensor_list[] = {
@@ -133,6 +128,10 @@ const uint8_t mb_4s_m_tray0_sensor_list[] = {
   MB_SNR_P3V3_M2_1_INA260_VOL,
   MB_SNR_P3V3_M2_2_INA260_VOL,
   MB_SNR_P3V3_M2_3_INA260_VOL,
+  MB_SNR_P12V_STBY_INA260_PWR,
+  MB_SNR_P3V3_M2_1_INA260_PWR,
+  MB_SNR_P3V3_M2_2_INA260_PWR,
+  MB_SNR_P3V3_M2_3_INA260_PWR,
   MB_SNR_VR_CPU0_VCCIN_VOLT,
   MB_SNR_VR_CPU0_VCCIN_TEMP,
   MB_SNR_VR_CPU0_VCCIN_CURR,
@@ -241,6 +240,10 @@ const uint8_t mb_slv_sensor_list[] = {
   MB_SNR_P3V3_M2_1_INA260_VOL,
   MB_SNR_P3V3_M2_2_INA260_VOL,
   MB_SNR_P3V3_M2_3_INA260_VOL,
+  MB_SNR_P12V_STBY_INA260_PWR,
+  MB_SNR_P3V3_M2_1_INA260_PWR,
+  MB_SNR_P3V3_M2_2_INA260_PWR,
+  MB_SNR_P3V3_M2_3_INA260_PWR,
   MB_SNR_VR_CPU0_VCCIN_VOLT,
   MB_SNR_VR_CPU0_VCCIN_TEMP,
   MB_SNR_VR_CPU0_VCCIN_CURR,
@@ -345,6 +348,10 @@ const uint8_t mb_2s_sensor_list[] = {
   MB_SNR_P3V3_M2_1_INA260_VOL,
   MB_SNR_P3V3_M2_2_INA260_VOL,
   MB_SNR_P3V3_M2_3_INA260_VOL,
+  MB_SNR_P12V_STBY_INA260_PWR,
+  MB_SNR_P3V3_M2_1_INA260_PWR,
+  MB_SNR_P3V3_M2_2_INA260_PWR,
+  MB_SNR_P3V3_M2_3_INA260_PWR,
   MB_SNR_VR_CPU0_VCCIN_VOLT,
   MB_SNR_VR_CPU0_VCCIN_TEMP,
   MB_SNR_VR_CPU0_VCCIN_CURR,
@@ -811,10 +818,10 @@ PAL_SENSOR_MAP sensor_map[] = {
   {"AL_MB_VR_PCH_PVNN_IOUT", VR_ID11, read_vr_iout, true, {26, 0, 0, 0, 0, 0, 0, 0}, CURR}, //0xCA
   {"AL_MB_VR_PCH_PVNN_POUT", VR_ID11, read_vr_pout, true, {33.6, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xCB
 
-  {"NULL", 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xCC
-  {"NULL", 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xCD
-  {"NULL", 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xCE
-  {"NUll", 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xCF
+  {"AL_MB_P12V_STBY_INA260_PWR", INA260_ID0, read_ina260_pwr, true,  {0, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xCC
+  {"AL_MB_P3V3_M2_1_INA260_PWR", INA260_ID1, read_ina260_pwr, false, {0, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xCD
+  {"AL_MB_P3V3_M2_2_INA260_PWR", INA260_ID2, read_ina260_pwr, false, {0, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xCE
+  {"AL_MB_P3V3_M2_3_INA260_PWR", INA260_ID3, read_ina260_pwr, false, {0, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xCF
 
   {"AL_MB_P5V",       ADC0, read_adc_val, false, {5.25, 0, 0, 4.75, 0, 0, 0, 0}, VOLT}, //0xD0
   {"AL_MB_P5V_STBY",  ADC1, read_adc_val, true,  {5.25, 0, 0, 4.75, 0, 0, 0, 0}, VOLT}, //0xD1
@@ -888,7 +895,7 @@ pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt) {
   }
   master = pal_get_config_is_master();
 
-  if (mode == MB_4S_MODE && master) {
+  if ( (mode == MB_4S_EX_MODE || mode == MB_4S_EP_MODE) && master ) {
     if (fru == FRU_TRAY0_MB) {
       *sensor_list = (uint8_t *)mb_4s_m_tray0_sensor_list;
       *cnt = mb_4s_m_tray0_sensor_cnt;
@@ -1156,7 +1163,7 @@ cmd_peci_get_thermal_margin(uint8_t cpu_addr, float* value) {
     return -1;
   }
 
-  *value = (float)(tmp >> 6);
+  *value = (float)(tmp / 64);
   return 0;
 }
 
@@ -1543,7 +1550,7 @@ get_hsc_rw_info(uint8_t* extend, uint8_t* mode) {
     return ret;
   }
 
-  if( *mode == MB_4S_MODE ) {
+  if( (*mode == MB_4S_EX_MODE) || (*mode == MB_4S_EP_MODE) ) {
     *extend = true;
   } else {
     *extend = false;
@@ -1866,12 +1873,12 @@ read_NM_pch_temp(uint8_t nm_id, float *value) {
 
 /*==========================================
 Read temperature sensor TMP421 value.
-Interface: temp_id: temperature id
+Interface: snr_id: temperature id
            *value: real temperature value
            return: error code
 ============================================*/
 static int
-read_sensor(uint8_t id, float *value) {
+read_sensor(uint8_t snr_id, float *value) {
   int ret;
 
   struct {
@@ -1885,13 +1892,13 @@ read_sensor(uint8_t id, float *value) {
     {"tmp421-i2c-19-4e", "MB_OUTLET_L_REMOTE_TEMP"},
     {"tmp421-i2c-19-4f", "MB_OUTLET_R_REMOTE_TEMP"},
   };
-  if (id >= ARRAY_SIZE(devs)) {
+  if (snr_id >= ARRAY_SIZE(devs)) {
     return -1;
   }
 
-  ret = sensors_read(devs[id].chip, devs[id].label, value);
+  ret = sensors_read(devs[snr_id].chip, devs[snr_id].label, value);
 
-  if( id == TEMP_REMOTE_INLET) {
+  if (snr_id == TEMP_REMOTE_INLET) {
 #ifdef DEBUG
     syslog(LOG_DEBUG, "Temp Calibration Bef=%f, Cal=%f\n", *value, InletCalibration);
 #endif
@@ -2035,6 +2042,58 @@ read_ina260_vol(uint8_t ina260_id, float *value) {
 
   err_exit:
   if (fd > 0) {
+    close(fd);
+  }
+  return ret;
+}
+
+static int
+read_ina260_pwr(uint8_t ina260_id, float *value) {
+  int fd = 0, ret = -1;
+  char fn[32];
+  float scale;
+  uint8_t retry = 3, tlen, rlen, addr, bus, cmd;
+  uint8_t tbuf[16] = {0};
+  uint8_t rbuf[16] = {0};
+  uint16_t tmp;
+
+  bus = ina260_info_list[ina260_id].bus;
+  cmd = INA260_POWER;
+  addr = ina260_info_list[ina260_id].slv_addr;
+  scale = 0.01;
+
+  snprintf(fn, sizeof(fn), "/dev/i2c-%d", bus);
+  fd = open(fn, O_RDWR);
+  if (fd < 0) {
+    goto err_exit;
+  }
+
+  tbuf[0] = cmd;
+  tlen = 1;
+  rlen = 2;
+
+  while (ret < 0 && retry-- > 0) {
+    ret = i2c_rdwr_msg_transfer(fd, addr, tbuf, tlen, rbuf, rlen);
+  }
+
+#ifdef DEBUG
+  syslog(LOG_DEBUG, "%s bus=%x cmd=%x slavaddr=%x\n", __func__, bus, cmd, addr);
+#endif
+
+  if (ret < 0) {
+    syslog(LOG_DEBUG, "ret=%d", ret);
+    goto err_exit;
+  }
+
+  tmp = (rbuf[0] << 8) | (rbuf[1]);
+  *value = (float)tmp * scale;
+
+#ifdef DEBUG
+  syslog(LOG_DEBUG, "%s tmp=%x val=%f\n", __func__, tmp, *value);
+#endif
+
+  err_exit:
+  if (fd >= 0) {
     close(fd);
   }
   return ret;
@@ -3167,7 +3226,7 @@ int pal_sensor_monitor_initial(void) {
     if (kv_set("mb_system_conf", "Type_2S", 0, KV_FPERSIST ) < 0) {
       syslog(LOG_WARNING, "Set 2S Air Flow Config Fail\n");
     }
-  } else if(mode == MB_4S_MODE && master) {
+  } else if( (mode == MB_4S_EX_MODE || mode == MB_4S_EP_MODE) && master ) {
     hsc_cnt = 2;
     DIMM_SLOT_CNT = 48;
     if (kv_set("mb_system_conf", "Type_4S", 0, KV_FPERSIST ) < 0) {

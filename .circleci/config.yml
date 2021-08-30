@@ -17,7 +17,7 @@ jobs:
             - run:
                 name: Install 'black'.
                 command: |
-                    python3 -m pip install "black==19.3b0"
+                    python3 -m pip install "black==21.4b2"
             - checkout
             - run:
                 name: Run lint.
@@ -52,6 +52,11 @@ jobs:
             - attach_workspace:
                 at: /tmp/job
             - run:
+                name: Set up git config for testing user.
+                command: |
+                    git config --global user.email "openbmc-circleci@fb.com"
+                    git config --global user.name "CircleCI Testing"
+            - run:
                 name: Adding usersetup to sudoer
                 command: |
                     sed -e '/usersetup/ s/^#*/#/' -i /etc/sudoers.usersetup
@@ -61,9 +66,11 @@ jobs:
                 command: |
                     chown -R usersetup:usersetup /tmp/job
             - run:
-                name: Check build required.
+                name: Check build required. Halt the CI if not needed.
                 command: |
-                    runuser -m usersetup -c './tools/circle-ci/check-build-required ptest'
+                    if ! runuser -m usersetup -c './tools/circle-ci/check-build-required ptest'; then
+                        circleci-agent step halt
+                    fi
             - run:
                 name: Download sstate cache.
                 command: |
@@ -88,9 +95,16 @@ jobs:
             - attach_workspace:
                 at: /tmp/job
             - run:
+                name: Set up git config for testing user.
+                command: |
+                    git config --global user.email "openbmc-circleci@fb.com"
+                    git config --global user.name "CircleCI Testing"
+            - run:
                 name: Check build required.
                 command: |
-                    ./tools/circle-ci/check-build-required
+                    if ! ./tools/circle-ci/check-build-required; then
+                        circleci-agent step halt
+                    fi
             - run:
                 name: Download sstate cache.
                 command: |
@@ -111,16 +125,15 @@ workflows:
             - build:
                 requires:
                     - setup
-                    - unit-test
                 matrix:
                     parameters:
                         machine: [
                             angelslanding,
+                            clearcreek,
+                            cloudripper,
                             cmm,
                             elbert,
                             emeraldpools,
-                            clearcreek,
-                            cloudripper,
                             fbgp2,
                             fbtp,
                             fbttn,
@@ -132,11 +145,11 @@ workflows:
                             lightning,
                             minipack,
                             northdome,
+                            qemux86,
                             sonorapass,
                             wedge,
                             wedge100,
                             wedge400,
                             yamp,
                             yosemite,
-                            qemux86,
                             ]

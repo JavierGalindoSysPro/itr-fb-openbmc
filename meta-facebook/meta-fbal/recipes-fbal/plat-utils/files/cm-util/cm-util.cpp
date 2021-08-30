@@ -19,29 +19,26 @@
  */
 
 #include <iostream>
-#include  <iomanip>
+#include <iomanip>
 #include <set>
 #include <map>
 #include <string>
 #include <CLI/CLI.hpp>
 #include <openbmc/pal.h>
 #include <openbmc/obmc-i2c.h>
+#include <openbmc/kv.h>
 
 struct ModeDesc {
   uint8_t mode;
   const std::string desc;
 };
 
-struct UsbChDesc {
-  uint8_t channel;
-  const std::string desc;
-};
-
 const std::map<std::string, ModeDesc> mode_map = {
     {"2S", {CM_MODE_2S, "2 Socket Mode"}},
-    {"4S-4OU", {CM_MODE_4S_4OU, "4 Socket mode, in 4OU mode"}},
-    {"4S-2OU-0", {CM_MODE_4S_2OU_0, "4 Socket mode with Tray 0 as primary"}},
-    {"4S-2OU-1", {CM_MODE_4S_2OU_1, "4 Socket mode with Tray 1 as primary"}}
+    {"4S-2OU-0", {CM_MODE_4S_EX_2OU_0, "4 Socket EX mode with Tray 0 as primary"}},
+    {"4S-2OU-1", {CM_MODE_4S_EX_2OU_1, "4 Socket EX mode with Tray 1 as primary"}},
+    {"4S-0", {CM_MODE_4S_EP_2OU_0, "4 Socket EP mode with Tray 0 as primary"}},
+    {"4S-1", {CM_MODE_4S_EP_2OU_1, "4 Socket EP mode with Tray 1 as primary"}}
 };
 
 static int set_mode(uint8_t mode)
@@ -51,9 +48,14 @@ static int set_mode(uint8_t mode)
 
   if (mode == CM_MODE_2S) {
     sys_mode = MB_2S_MODE;
-  } else if (mode == CM_MODE_4S_4OU || mode == CM_MODE_4S_2OU_0 ||
-             mode == CM_MODE_4S_2OU_1) {
-    sys_mode = MB_4S_MODE;
+  } else if (mode == CM_MODE_4S_EX_2OU_0 || mode == CM_MODE_4S_EX_2OU_1) {
+    sys_mode = MB_4S_EX_MODE;
+  } else if (mode == CM_MODE_4S_EP_2OU_0 || mode == CM_MODE_4S_EP_2OU_1) {
+    sys_mode = MB_4S_EP_MODE;
+    if (pal_get_config_is_master())
+      kv_set("mb_skt", "0", 0, 0);
+    else
+      kv_set("mb_skt", "1", 0, 0);
   } else {
     std::cerr << "Configuration is invaild" << std::endl;
     return -1;
@@ -79,14 +81,15 @@ static std::set<std::string> get_bmcs()
     return ret;
   }
   ret.insert("emeraldpools");
-  if (mode > 4) {
-    ret.insert("clearcreek");
+  if ( (mode > 4) ) {
     uint8_t pos;
-    if (cmd_cmc_get_mb_position(&pos) || pos == 0) {
+    if (cmd_cmc_get_mb_position(&pos) || pos == 0)
       ret.insert("tray1");
-    } else {
+    else
       ret.insert("tray0");
-    }
+
+    if (mode <= CM_MODE_4S_EX_2OU_0)
+      ret.insert("clearcreek");
   }
   return ret;
 }
@@ -99,11 +102,12 @@ static int get_mode()
   }
   auto get_mode_desc = [](uint8_t md) {
     std::string desc = "Unknown mode: " + std::to_string(int(md));
-    for (const auto &pair : mode_map) {
-      if (md == pair.second.mode) {
-        desc = pair.first + ": " + pair.second.desc;
-        break;
-      }
+    auto iter = find_if(mode_map.begin(), mode_map.end(),
+                        [&md](const auto &pair) {
+                          return (md == pair.second.mode);
+                        });
+    if (iter != mode_map.end()) {
+      desc = iter->first + ": " + iter->second.desc;
     }
     return desc;
   };

@@ -198,7 +198,7 @@ _sdr_get_sensor_units(sdr_full_t *sdr, uint8_t *op, uint8_t *modifier,
   if (percent) {
     sprintf(units, "%%");
   } else {
-    if (base_idx > 0 && base_idx <= MAX_SENSOR_BASE_UNIT) {
+    if (base_idx >= 0 && base_idx <= MAX_SENSOR_BASE_UNIT) {
       if (rate_idx > 0 && rate_idx < MAX_SENSOR_RATE_UNIT) {
         sprintf(units, "%s %s", sensor_base_units[base_idx],
             sensor_rate_units[rate_idx]);
@@ -219,7 +219,7 @@ sdr_get_sensor_units(uint8_t fru, uint8_t snr_num, char *units) {
   uint8_t modifier;
   sdr_full_t *sdr;
 
-  sensor_info_t sinfo[MAX_SENSOR_NUM] = {0};
+  sensor_info_t sinfo[MAX_SENSOR_NUM + 1] = {0};
 
   if (pal_sensor_sdr_init(fru, sinfo) < 0) {
     sdr = NULL;
@@ -338,7 +338,7 @@ sdr_get_sensor_name(uint8_t fru, uint8_t snr_num, char *name) {
   int ret = 0;
   sdr_full_t *sdr;
 
-  sensor_info_t sinfo[MAX_SENSOR_NUM] = {0};
+  sensor_info_t sinfo[MAX_SENSOR_NUM + 1] = {0};
 
   if (pal_sensor_sdr_init(fru, sinfo) < 0) {
     sdr = NULL;
@@ -569,7 +569,7 @@ sdr_get_snr_thresh(uint8_t fru, uint8_t snr_num, thresh_sensor_t *snr) {
   char initflag[64] = {0};
   char fru_name[16];
 
-  sensor_info_t sinfo[MAX_SENSOR_NUM] = {0};
+  sensor_info_t sinfo[MAX_SENSOR_NUM + 1] = {0};
 
   ret = pal_sensor_sdr_init(fru, sinfo);
 

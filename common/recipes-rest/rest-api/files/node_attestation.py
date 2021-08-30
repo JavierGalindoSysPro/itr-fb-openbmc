@@ -18,37 +18,63 @@
 # Boston, MA 02110-1301 USA
 #
 try:
-    # Add all attestation related imports here
+    # Add all bmc attestation related imports here
     import obmc_attestation.helpers
     import obmc_attestation.measure
     import obmc_attestation.tpm2
 
-    ATTESTATION_AVAILABLE = True
+    BMC_ATTESTATION_AVAILABLE = True
 except ImportError:
-    ATTESTATION_AVAILABLE = False
+    BMC_ATTESTATION_AVAILABLE = False
     # Doing this so that we don't break upstream
+
+try:
+    # Add all device attestation related imports here
+    import device_attestation.measure
+
+    DEVICE_ATTESTATION_AVAILABLE = True
+except ImportError:
+    DEVICE_ATTESTATION_AVAILABLE = False
+    # Doing this so that we don't break obmc attestation
+
+from aiohttp.web import Application
+from compute_rest_shim import RestShim
 from node import node
-from tree import tree
+
+ACCEPTABLE_ALGORITHMS = ["sha1", "sha256"]
 
 
-def get_tree_attestation() -> tree:
-    tree_attestation = tree("attestation", node())
-    if not ATTESTATION_AVAILABLE:
+def setup_attestation_endpoints(app: Application) -> None:
+    attestation_shim = RestShim(node(), "/api/attestation")
+    app.router.add_get(attestation_shim.path, attestation_shim.get_handler)
+    if not BMC_ATTESTATION_AVAILABLE:
         # Return witout actually adding any endpoints/attaching
         # them to any logic
-        return tree_attestation
+        return
     # GET /attestation/system_information
     # Always try to keep these in sync with the CLI
-    tree_attestation.addChild(tree("system_information", NodeSystemInfo()))
+    sysinfo_shim = RestShim(NodeSystemInfo(), "/api/attestation/system_information")
+    app.router.add_get(sysinfo_shim.path, sysinfo_shim.get_handler)
+
     tpm_actions = ["ek-cert", "create-aik", "pcr-quote", "challenge-aik", "load-aik"]
-    tree_attestation.addChild(tree("tpm", get_tpm_nodes(tpm_actions)))
-    return tree_attestation
+    tpm_shim = RestShim(get_tpm_nodes(tpm_actions), "/api/attestation/tpm")
+    app.router.add_get(tpm_shim.path, tpm_shim.get_handler)
+    app.router.add_post(tpm_shim.path, tpm_shim.post_handler)
+
+    if DEVICE_ATTESTATION_AVAILABLE:
+        device_attestation_actions = ["measurement"]
+        device_attestation_shim = RestShim(
+            NodeDeviceAttestation(device_attestation_actions), "/api/attestation/device"
+        )
+        app.router.add_post(
+            device_attestation_shim.path, device_attestation_shim.post_handler
+        )
 
 
 class NodeSystemInfo(node):
     @staticmethod
     # GET /attestation/system_information
-    def getInformation(param={}):
+    async def getInformation(param):
         args = {}
         # Default args
         args["algo"] = "sha256"
@@ -56,7 +82,14 @@ class NodeSystemInfo(node):
         args["flash1"] = "/dev/flash1"
         args["recal"] = False
         # We update the params if any were passed
+        for argument in param.keys():
+            if argument not in ["algo"]:
+                raise Exception("You are allowed to specify only algo")
         args.update(param)
+        if args["algo"] not in ACCEPTABLE_ALGORITHMS:
+            raise Exception(
+                "Only acceptable algos are: {}".format(str(ACCEPTABLE_ALGORITHMS))
+            )
         result = {}
         # Let's get the system hashes first
         result["system_hashes"] = obmc_attestation.measure.return_measure(args)
@@ -73,7 +106,7 @@ class NodeTPM(node):
         self.actions = actions
         self.tpm = obmc_attestation.tpm2.Tpm2v4()
 
-    def doAction(self, data, param={}):
+    async def doAction(self, data, param):
         # We will delete the action key from the data
         # and directly pass it onto the underlying function
         # as kwargs hoping that the function callee
@@ -99,3 +132,23 @@ class NodeTPM(node):
 
 def get_tpm_nodes(actions):
     return NodeTPM(actions)
+
+
+class NodeDeviceAttestation(node):
+    def __init__(self, actions=None):
+        self.actions = actions
+
+    async def doAction(self, data, param):
+        # We will delete the action key from the data
+        # and directly pass it onto the underlying function
+        # as kwargs hoping that the function callee
+        # obeys arguments structure
+        action = data["action"]
+        del data["action"]
+        if action == "measurement":
+            return device_attestation.measure.return_measure(**data)
+        else:
+            return {
+                "status": "1",
+                "message": "not supported",
+            }

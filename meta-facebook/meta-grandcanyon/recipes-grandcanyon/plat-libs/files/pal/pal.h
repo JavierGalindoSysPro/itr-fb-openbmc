@@ -43,6 +43,7 @@ extern "C" {
 #define MAX_NODES       1
 #define FRUID_SIZE      512
 #define CUSTOM_FRU_LIST 1
+#define FRU_DEVICE_LIST 1
 
 #define MAX_FRU_CMD_STR   16
 
@@ -60,11 +61,6 @@ extern "C" {
 #define IOCM_TMP75_DEVICE_DIR             "/sys/class/i2c-dev/i2c-13/device/13-004a"
 #define IOCM_TMP75_DEVICE_NAME            "tmp75"
 #define IOCM_TMP75_ADDR                   (0x4a)
-
-#define SKU_UIC_ID_SIZE       2
-#define SKU_UIC_TYPE_SIZE     4
-#define SKU_SIZE              (SKU_UIC_ID_SIZE + SKU_UIC_TYPE_SIZE)
-#define MAX_SKU_VALUE         (1 << SKU_SIZE)
 
 // IOCM EEPROM
 #define IOCM_EEPROM_BIND_DIR         "/sys/bus/i2c/drivers/at24/13-0050"
@@ -116,8 +112,15 @@ extern "C" {
 
 // System Control Unit (SCU) Register
 #define SCU_BASE                   0x1E6E2000
+#define REG_SCU014                 0x14
 #define REG_SCU074                 0x74
-#define OFFSET_EXTRST_EVENT_LOG    (1 << 1)
+#define OFFSET_SRST_EVENT_LOG      (1 << 0)
+#define OFFSET_BMC_REV_ID          (16)
+
+// Boot magic
+#define SRAM_BMC_REBOOT_BASE       0x10015000
+#define BOOT_MAGIC_OFFSET          0xC08
+#define BOOT_MAGIC                 0xFB420054
 
 #define ROUTE_UART2_TO_IO2  (0)
 #define ROUTE_UART6_TO_IO6  ((1 << 9) | (1 << 11))
@@ -142,6 +145,16 @@ extern "C" {
 #define WWID_SIZE    (8)
 #define WWID_OFFSET  (0x400)
 
+#define MAX_FPGA_VER_LEN      4
+#define GET_FPGA_VER_ADDR     0x40
+#define GET_FPGA_VER_OFFSET   (0x28002000)
+
+#define E1S_IOCM_SLOT_NUM 2
+
+#define BIOS_POST_CMPLT   67
+
+#define ERROR_ID_LOG_LEN  16
+
 typedef enum {
   STATUS_LED_OFF,
   STATUS_LED_YELLOW,
@@ -158,6 +171,8 @@ extern const char pal_fru_list_rw[];
 extern const char pal_fru_list_sensor_history[];
 extern const char pal_fru_list[];
 extern const char pal_pwm_list[];
+extern const char pal_dev_pwr_list[];
+extern const char pal_dev_pwr_option_list[];
 extern const char pal_tach_list[];
 extern const char pal_server_list[];
 
@@ -187,13 +202,34 @@ enum {
 enum {
   BIC_SENSOR_VRHOT = 0xB4,
   BIC_SENSOR_SYSTEM_STATUS = 0x46,
+  BIC_SENSOR_PROC_FAIL = 0x65,
 };
 
 enum {
-  SEL_SNR_TYPE   = 0x10,
-  SEL_SNR_NUM    = 0x11,
-  SEL_EVENT_TYPE = 0x12,
-  SEL_EVENT_DATA = 0x13,
+  SCC_DRAWER = 0x00,
+};
+
+enum {
+  SEL_SNR_TYPE   = 10,
+  SEL_SNR_NUM    = 11,
+  SEL_EVENT_TYPE = 12,
+  SEL_EVENT_DATA = 13,
+};
+
+//Event/Reading Type Code Ranges, reference from IPMI spec v2.0 sec 42 Sensor and Event Code Tables
+enum {
+  GENERIC         = 0x05,
+  SENSOR_SPECIFIC = 0x6F,
+};
+
+//Sensor Type Codes
+enum {
+  PHYSICAL_SECURITY = 0x05,
+};
+
+//Sensor-specific Offset of Physical Security
+enum {
+  GENERAL_CHASSIS_INTRUSION = 0x00,
 };
 
 //System status event
@@ -221,15 +257,18 @@ enum {
   NIC_PE_RST_HIGH  = 0x01,
 };
 
+// BMC hardware revision ID
+enum {
+  ASPEED_A0 = 0x0,
+  ASPEED_A1 = 0x1,
+  ASPEED_A2 = 0x2,
+  ASPEED_A3 = 0x3
+};
+
 typedef struct {
 	uint8_t pcie_cfg;
 	uint8_t completion_code;
 } get_pcie_config_response;
-
-typedef struct _platformInformation {
-  char uicId[SKU_UIC_ID_SIZE];
-  char uicType[SKU_UIC_TYPE_SIZE];
-} platformInformation;
 
 typedef struct {
   uint8_t target;
@@ -297,6 +336,16 @@ typedef struct {
   uint8_t wwid[WWID_SIZE];
 } ioc_wwid_req;
 
+typedef struct {
+  uint8_t exp_uart_bridging_cmd_code;
+  uint8_t exp_uart_bridging_mode;
+} exp_uart_bridging_cmd;
+
+typedef struct {
+    uint8_t err_id;
+    char *err_desc;
+} PCIE_ERR_DECODE;
+
 enum {
   UIC_SIDEA          = 1,
   UIC_SIDEB          = 2,
@@ -356,6 +405,25 @@ enum IOC_WWID_COMPONENT {
   IOCM_IOC_WWID = 0x1,
 };
 
+enum exp_uart_bridging_status {
+  DISABLE_BRIDGING = 0x0,
+  ENABLE_BRIDGING  = 0x1,
+};
+
+enum DEV_ACTION {
+  GET_DEV_POWER = 0x0,
+  SET_DEV_POWER = 0x1,
+  GET_DEV_LED   = 0x2,
+  SET_DEV_LED   = 0x3,
+  GET_DEV_PRESENT = 0x4,
+};
+
+enum DEV_LED_STATUS {
+  DEV_LED_OFF      = 0x0,
+  DEV_LED_ON       = 0x1,
+  DEV_LED_BLINKING = 0x2,
+};
+
 int pal_set_id_led(uint8_t slot, enum LED_HIGH_ACTIVE status);
 int pal_set_status_led(uint8_t fru, status_led_color color);
 int pal_set_e1s_led(uint8_t fru, e1s_led_id id, enum LED_HIGH_ACTIVE status);
@@ -394,6 +462,14 @@ int pal_get_heartbeat(float *hb_val, uint8_t component);
 int pal_handle_oem_1s_intr(uint8_t fru, uint8_t *data);
 int pal_handle_oem_1s_asd_msg_in(uint8_t fru, uint8_t *data, uint8_t data_len);
 int pal_set_nic_perst(uint8_t val);
+bool pal_is_ioc_ready(uint8_t i2c_bus);
+int pal_check_fru_is_valid(const char* fruid_path);
+int pal_get_cached_value(char *key, char *value);
+int pal_set_cached_value(char *key, char *value);
+int pal_get_fpga_ver_cache(uint8_t bus, uint8_t addr, char *ver_str);
+int pal_set_fpga_ver_cache(uint8_t bus, uint8_t addr);
+int pal_clear_event_only_error_ack();
+int pal_check_server_power_change_correct(uint8_t action);
 
 #ifdef __cplusplus
 } // extern "C"

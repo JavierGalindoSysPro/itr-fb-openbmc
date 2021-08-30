@@ -113,9 +113,9 @@ int pal_check_carrier_type(int index)
     }
   }
 
-  if (!strcmp(type, "m.2")) {
+  if (!strcmp(type, "m.2") || !strcmp(type, "m.2_v2")) {
     return M2;
-  } else if (!strcmp(type, "e1.s")) {
+  } else if (!strcmp(type, "e1.s") || !strcmp(type, "e1.s_v2")) {
     return E1S;
   }
   return 0;
@@ -251,7 +251,7 @@ int pal_is_fru_prsnt(uint8_t fru, uint8_t *status)
   if (desc == NULL)
     return -1;
   if (gpio_get_value(desc, &value) == 0) {
-    *status = 1;
+    *status = !value;
     ret = 0;
   }
 

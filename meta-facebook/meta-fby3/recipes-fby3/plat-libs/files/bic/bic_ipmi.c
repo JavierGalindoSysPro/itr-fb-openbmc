@@ -62,12 +62,17 @@ typedef struct _sdr_rec_hdr_t {
 
 #define KV_SLOT_IS_M2_EXP_PRESENT "slot%x_is_m2_exp_prsnt"
 #define KV_SLOT_GET_1OU_TYPE      "slot%x_get_1ou_type"
+#define KV_MB_INDEX               "get_mb_index"
+
+#define KV_SLOT_IS_2U_TOPBOT_PRESENT "slot%x_is_2u_topbot_prsnt"
 
 #define MIN(x,y) (((x) < (y)) ? (x) : (y))
 
 #define BIC_SENSOR_SYSTEM_STATUS  0x46
 
 #define BB_FW_UPDATE_STAT_FILE "/tmp/cache_store/bb_fw_update"
+
+#define GPIO_FALSE_DIR "/tmp/gpio/bic%d_%d"
 
 enum {
   M2_PWR_OFF = 0x00,
@@ -282,6 +287,46 @@ _verify_fruid(uint8_t *data, int fru_size) {
   return BIC_STATUS_SUCCESS;
 }
 
+bool
+bic_is_crit_act_ongoing(uint8_t fruid) {
+  char value[MAX_VALUE_LEN] = {0};
+  int ret = kv_get("pwr_lock", value, NULL, 0);
+
+  if (ret < 0) {
+    // power lock hasn't been asserted
+    if (errno == ENOENT) {
+      // return false because there is no critical activity in progress
+      return false;
+    }
+
+    syslog(LOG_WARNING, "%s() Cannot get pwr_lock", __func__);
+    return true;
+  }
+
+  // if pwr_lock is 1, return true
+  return (strncmp(value, "1", 1) == 0)?true:false;
+}
+
+bool
+bic_is_fw_update_ongoing(uint8_t fruid) {
+  char key[MAX_KEY_LEN] = {0};
+  char value[MAX_VALUE_LEN] = {0};
+  int ret = BIC_STATUS_SUCCESS;
+  struct timespec ts;
+
+  sprintf(key, "fru%d_fwupd", fruid);
+  ret = kv_get(key, value, NULL, 0);
+  if (ret < 0) {
+     return false;
+  }
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  if (strtoul(value, NULL, 10) > ts.tv_sec)
+     return true;
+
+  return false;
+}
+
 int
 bic_read_fruid(uint8_t slot_id, uint8_t fru_id, const char *path, int *fru_size, uint8_t intf) {
 #define RETRY_DELAY 3
@@ -306,14 +351,20 @@ bic_read_fruid(uint8_t slot_id, uint8_t fru_id, const char *path, int *fru_size,
     goto error_exit;
   }
 
-  do {
+  while ( retry < RETRY_3_TIME ) {
+    if ( bic_is_fw_update_ongoing(slot_id) == true ) {
+      sleep(5);
+      continue;
+    }
+
     // Read the FRUID information
     ret = bic_get_fruid_info(slot_id, fru_id, &info, intf);
     if ( ret < 0 ) {
       syslog(LOG_ERR, "bic_read_fruid: bic_read_fruid_info returns %d\n", ret);
       sleep(RETRY_DELAY * (retry + 1));
     } else break;
-  } while ( retry++ < RETRY_TIME );
+    retry++;
+  }
 
   if ( retry == RETRY_3_TIME ) goto error_exit;
   else ret = BIC_STATUS_FAILURE;
@@ -333,7 +384,12 @@ bic_read_fruid(uint8_t slot_id, uint8_t fru_id, const char *path, int *fru_size,
   }
 
   retry = 0;
-  do {
+  while ( retry < RETRY_TIME) {
+    if ( bic_is_fw_update_ongoing(slot_id) == true ) {
+      sleep(5);
+      continue;
+    }
+
     // Read chunks of FRUID binary data in a loop
     offset = 0;
     nread = *fru_size;
@@ -367,10 +423,12 @@ bic_read_fruid(uint8_t slot_id, uint8_t fru_id, const char *path, int *fru_size,
     }
 
     if ( ret < 0 ) {
-      syslog(LOG_WARNING, "%s() verified fruid failed, slot:%d, retry:%d, intf:%02X\n", __func__, slot_id, retry, intf);
+      syslog(LOG_WARNING, "%s() verified fruid failed, slot:%d, retry:%d, intf:%02X, size: %d\n", __func__, slot_id, retry, intf, offset);
       sleep(RETRY_DELAY * (retry + 1));
     } else break;
-  } while ( retry++ < RETRY_TIME );
+
+    retry++;
+  }
 
 error_exit:
   if ( buf != NULL ) free(buf);
@@ -480,12 +538,73 @@ bic_get_fw_ver(uint8_t slot_id, uint8_t comp, uint8_t *ver) {
     case FW_1OU_BIC:
     case FW_2OU_BIC:
     case FW_BB_BIC:
+    case FW_CWC_BIC:
+    case FW_GPV3_TOP_BIC:
+    case FW_GPV3_BOT_BIC:
       fw_comp = FW_BIC;
       break;
     case FW_1OU_BIC_BOOTLOADER:
     case FW_2OU_BIC_BOOTLOADER:
     case FW_BB_BIC_BOOTLOADER:
+    case FW_CWC_BIC_BL:
+    case FW_GPV3_TOP_BIC_BL:
+    case FW_GPV3_BOT_BIC_BL:
       fw_comp = FW_BIC_BOOTLOADER;
+      break;
+    case FW_CWC_CPLD:
+    case FW_GPV3_TOP_CPLD:
+    case FW_GPV3_BOT_CPLD:
+      fw_comp = FW_2OU_CPLD;
+      break;
+    case FW_CWC_PESW:
+    case FW_GPV3_TOP_PESW:
+    case FW_GPV3_BOT_PESW:
+      fw_comp = FW_2OU_PESW_FW_VER;
+      break;
+    case FW_CWC_PESW_VR:
+    case FW_GPV3_TOP_PESW_VR:
+    case FW_GPV3_BOT_PESW_VR:
+      fw_comp = FW_2OU_PESW_VR;
+      break;
+    case FW_2U_TOP_PESW_CFG_VER:
+    case FW_2U_BOT_PESW_CFG_VER:
+      fw_comp = FW_2OU_PESW_CFG_VER;
+      break;
+    case FW_2U_TOP_PESW_FW_VER:
+    case FW_2U_BOT_PESW_FW_VER:
+      fw_comp = FW_2OU_PESW_FW_VER;
+      break;
+    case FW_2U_TOP_PESW_BL0_VER:
+    case FW_2U_BOT_PESW_BL0_VER:
+      fw_comp = FW_2OU_PESW_BL0_VER;
+      break;
+    case FW_2U_TOP_PESW_BL1_VER:
+    case FW_2U_BOT_PESW_BL1_VER:
+      fw_comp = FW_2OU_PESW_BL1_VER;
+      break;
+    case FW_2U_TOP_PESW_PART_MAP0_VER:
+    case FW_2U_BOT_PESW_PART_MAP0_VER:
+      fw_comp = FW_2OU_PESW_PART_MAP0_VER;
+      break;
+    case FW_2U_TOP_PESW_PART_MAP1_VER:
+    case FW_2U_BOT_PESW_PART_MAP1_VER:
+      fw_comp = FW_2OU_PESW_PART_MAP1_VER;
+      break;
+    case FW_2U_TOP_3V3_VR1:
+    case FW_2U_BOT_3V3_VR1:
+      fw_comp = FW_2OU_3V3_VR1;
+      break;
+    case FW_2U_TOP_3V3_VR2:
+    case FW_2U_BOT_3V3_VR2:
+      fw_comp = FW_2OU_3V3_VR2;
+      break;
+    case FW_2U_TOP_3V3_VR3:
+    case FW_2U_BOT_3V3_VR3:
+      fw_comp = FW_2OU_3V3_VR3;
+      break;
+    case FW_2U_TOP_1V8_VR:
+    case FW_2U_BOT_1V8_VR:
+      fw_comp = FW_2OU_1V8_VR;
       break;
     default:
       fw_comp = comp;
@@ -519,12 +638,51 @@ bic_get_fw_ver(uint8_t slot_id, uint8_t comp, uint8_t *ver) {
     case FW_2OU_PESW_BL1_VER:
     case FW_2OU_PESW_PART_MAP0_VER:
     case FW_2OU_PESW_PART_MAP1_VER:
+    case FW_CWC_BIC:
+    case FW_CWC_BIC_BL:
+    case FW_CWC_CPLD:
+    case FW_CWC_PESW:
+    case FW_CWC_PESW_VR:
       intf = REXP_BIC_INTF;
       break;
     case FW_BB_BIC:
     case FW_BB_BIC_BOOTLOADER:
     case FW_BB_CPLD:
       intf = BB_BIC_INTF;
+      break;
+    case FW_GPV3_TOP_BIC:
+    case FW_GPV3_TOP_BIC_BL:
+    case FW_GPV3_TOP_CPLD:
+    case FW_GPV3_TOP_PESW:
+    case FW_GPV3_TOP_PESW_VR:
+    case FW_2U_TOP_PESW_CFG_VER:
+    case FW_2U_TOP_PESW_FW_VER:
+    case FW_2U_TOP_PESW_BL0_VER:
+    case FW_2U_TOP_PESW_BL1_VER:
+    case FW_2U_TOP_PESW_PART_MAP0_VER:
+    case FW_2U_TOP_PESW_PART_MAP1_VER:
+    case FW_2U_TOP_3V3_VR1:
+    case FW_2U_TOP_3V3_VR2:
+    case FW_2U_TOP_3V3_VR3:
+    case FW_2U_TOP_1V8_VR:
+      intf = RREXP_BIC_INTF1;
+      break;
+    case FW_GPV3_BOT_BIC:
+    case FW_GPV3_BOT_BIC_BL:
+    case FW_GPV3_BOT_CPLD:
+    case FW_GPV3_BOT_PESW:
+    case FW_GPV3_BOT_PESW_VR:
+    case FW_2U_BOT_PESW_CFG_VER:
+    case FW_2U_BOT_PESW_FW_VER:
+    case FW_2U_BOT_PESW_BL0_VER:
+    case FW_2U_BOT_PESW_BL1_VER:
+    case FW_2U_BOT_PESW_PART_MAP0_VER:
+    case FW_2U_BOT_PESW_PART_MAP1_VER:
+    case FW_2U_BOT_3V3_VR1:
+    case FW_2U_BOT_3V3_VR2:
+    case FW_2U_BOT_3V3_VR3:
+    case FW_2U_BOT_1V8_VR:
+      intf = RREXP_BIC_INTF2;
       break;
   }
 
@@ -551,6 +709,41 @@ bic_get_fw_ver(uint8_t slot_id, uint8_t comp, uint8_t *ver) {
     case FW_2OU_PESW_PART_MAP1_VER:
     case FW_BB_BIC:
     case FW_BB_BIC_BOOTLOADER:
+    case FW_CWC_BIC:
+    case FW_GPV3_TOP_BIC:
+    case FW_GPV3_BOT_BIC:
+    case FW_CWC_BIC_BL:
+    case FW_GPV3_TOP_BIC_BL:
+    case FW_GPV3_BOT_BIC_BL:
+    case FW_CWC_PESW:
+    case FW_GPV3_TOP_PESW:
+    case FW_GPV3_BOT_PESW:
+    case FW_CWC_CPLD:
+    case FW_GPV3_TOP_CPLD:
+    case FW_GPV3_BOT_CPLD:
+    case FW_CWC_PESW_VR:
+    case FW_GPV3_TOP_PESW_VR:
+    case FW_GPV3_BOT_PESW_VR:
+    case FW_2U_TOP_PESW_CFG_VER:
+    case FW_2U_TOP_PESW_FW_VER:
+    case FW_2U_TOP_PESW_BL0_VER:
+    case FW_2U_TOP_PESW_BL1_VER:
+    case FW_2U_TOP_PESW_PART_MAP0_VER:
+    case FW_2U_TOP_PESW_PART_MAP1_VER:
+    case FW_2U_BOT_PESW_CFG_VER:
+    case FW_2U_BOT_PESW_FW_VER:
+    case FW_2U_BOT_PESW_BL0_VER:
+    case FW_2U_BOT_PESW_BL1_VER:
+    case FW_2U_BOT_PESW_PART_MAP0_VER:
+    case FW_2U_BOT_PESW_PART_MAP1_VER:
+    case FW_2U_TOP_3V3_VR1:
+    case FW_2U_TOP_3V3_VR2:
+    case FW_2U_TOP_3V3_VR3:
+    case FW_2U_TOP_1V8_VR:
+    case FW_2U_BOT_3V3_VR1:
+    case FW_2U_BOT_3V3_VR2:
+    case FW_2U_BOT_3V3_VR3:
+    case FW_2U_BOT_1V8_VR:
       ret = _bic_get_fw_ver(slot_id, fw_comp, ver, intf);
       break;
     case FW_1OU_CPLD:
@@ -585,7 +778,7 @@ get_gpv3_bus_number(uint8_t dev_id) {
     case FW_2OU_M2_DEV0:
     case FW_2OU_M2_DEV1:
     case DEV_ID0_2OU:
-    case DEV_ID1_2OU:    
+    case DEV_ID1_2OU:
       return 0x2;
     case FW_2OU_M2_DEV2:
     case FW_2OU_M2_DEV3:
@@ -662,7 +855,7 @@ int
 bic_enable_vr_fault_monitor(uint8_t slot_id, bool enable, uint8_t intf) {
   uint8_t tbuf[4] = {0x9c, 0x9c, 0x00, ( enable == true )?0x1:0x0};
   uint8_t tlen = 4;
-  uint8_t rbuf[16] = {0};
+  uint8_t rbuf[24] = {0};
   uint8_t rlen = 0;
   return bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, BIC_CMD_OEM_BIC_VR_MONITOR, tbuf, tlen, rbuf, &rlen, intf);
 }
@@ -673,10 +866,10 @@ bic_enable_ssd_sensor_monitor(uint8_t slot_id, bool enable, uint8_t intf) {
   uint8_t tlen = 4;
   uint8_t rbuf[16] = {0};
   uint8_t rlen = 0;
-  return bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, BIC_CMD_OEM_BIC_SNR_MONITOR, tbuf, tlen, rbuf, &rlen, intf); 
+  return bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, BIC_CMD_OEM_BIC_SNR_MONITOR, tbuf, tlen, rbuf, &rlen, intf);
 }
 
-int 
+int
 bic_get_1ou_type(uint8_t slot_id, uint8_t *type) {
   uint8_t tbuf[3] = {0x9c, 0x9c, 0x00};
   uint8_t rbuf[16] = {0};
@@ -688,13 +881,13 @@ bic_get_1ou_type(uint8_t slot_id, uint8_t *type) {
   int val = 0;
 
   snprintf(key, sizeof(key), KV_SLOT_GET_1OU_TYPE, slot_id);
-  
+
   while (retry < 3) {
     ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, BIC_CMD_OEM_GET_BOARD_ID, tbuf, 3, rbuf, &rlen, FEXP_BIC_INTF);
     if (ret == 0) break;
     retry++;
   }
-  
+
   if (ret == 0) {
     *type = rbuf[3];
     val = *type;
@@ -702,7 +895,7 @@ bic_get_1ou_type(uint8_t slot_id, uint8_t *type) {
     syslog(LOG_WARNING, "[%s] fail at slot%d", __func__, slot_id);
     val = ret;
   }
-  
+
   snprintf(tmp_str, sizeof(tmp_str), "%d", val);
   kv_set(key, tmp_str, 0, 0);
   return ret;
@@ -733,7 +926,7 @@ bic_set_amber_led(uint8_t slot_id, uint8_t dev_id, uint8_t status) {
   uint8_t rlen = 0;
   int ret = 0;
   int retry = 0;
-  
+
   tbuf[3] = dev_id; // 0'base
   tbuf[4] = status; // 0->off, 1->on
   while (retry < 3) {
@@ -741,11 +934,73 @@ bic_set_amber_led(uint8_t slot_id, uint8_t dev_id, uint8_t status) {
     if (ret == 0) break;
     retry++;
   }
-  
+
   if (ret != 0) {
     syslog(LOG_WARNING, "[%s] fail at slot%u dev%u", __func__, slot_id, dev_id);
   }
-  
+
+  return ret;
+}
+
+int
+bic_get_amber_led_status(uint8_t slot_id, uint8_t dev_id, uint8_t *status) {
+  uint8_t tbuf[4] = {0x9c, 0x9c, 0x00, 0x00};
+  uint8_t rbuf[4] = {0};
+  uint8_t rlen = 0;
+  int ret = 0;
+  int retry = 0;
+
+  tbuf[3] = dev_id; // 0'base
+  while (retry < 3) {
+    ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, BIC_CMD_OEM_GET_AMBER_LED_STATUS, tbuf, 4, rbuf, &rlen, FEXP_BIC_INTF);
+    if (ret == 0) break;
+    retry++;
+  }
+
+  if (ret != 0) {
+    syslog(LOG_WARNING, "[%s] fail at slot%u dev%u", __func__, slot_id, dev_id);
+  } else {
+    *status = rbuf[3];
+  }
+
+  return ret;
+}
+
+int
+bic_spe_led_ctrl(uint8_t dev_id, uint8_t option, uint8_t* status) {
+  uint8_t tbuf[MAX_IPMB_REQ_LEN] = {0x9c, 0x9c, 0x00, 0x00, 0x00};
+  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
+  uint8_t rlen = 0;
+  int ret = 0;
+  int retry = 0;
+
+  if (status == NULL) {
+    syslog(LOG_WARNING, "%s() status is missing", __func__);
+    return -1;
+  }
+  tbuf[3] = dev_id - DEV_ID0_2OU;
+  tbuf[4] = option;
+  while (retry < 3) {
+    ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_SET_AMBER_LED, tbuf, 5, rbuf, &rlen, REXP_BIC_INTF);
+    if (ret == 0) {
+      break;
+    }
+    retry++;
+  }
+
+  if (ret != 0) {
+    syslog(LOG_WARNING, "%s() fail at dev%u", __func__, dev_id);
+  }
+  if (option == GET_LED_STAT) {
+    if (rlen != 4) {
+      syslog(LOG_WARNING, "%s() failed to get LED status, rlen = %d", __func__, rlen);
+      return -1;
+    }
+    // byte 0~2: IANA ID
+    // byte 3: status
+    *status = rbuf[3];
+  }
+
   return ret;
 }
 
@@ -928,19 +1183,19 @@ bic_get_vr_ver(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, char *k
       syslog(LOG_WARNING, "%s():%d Failed to send command code to get vr remaining writes. ret=%d", __func__,__LINE__, ret);
       goto error_exit;
     }
- 
+
     //get the CRC32 of the VR
     tbuf[2] = 0x00; //read cnt
     tbuf[3] = 0x00; //command code
     tbuf[4] = 0x62;
     tlen = 5;
-    
+
     ret = bic_ipmb_send(slot_id, NETFN_APP_REQ, CMD_APP_MASTER_WRITE_READ, tbuf, tlen, rbuf, &rlen, intf);
     if ( ret < 0 ) {
       syslog(LOG_WARNING, "%s():%d Failed to send command code to get vr ver. ret=%d", __func__,__LINE__, ret);
       goto error_exit;
     }
-    
+
     tbuf[2] = 0x2; //read cnt
     tbuf[3] = 0x42; //command code
     tlen = 4;
@@ -949,7 +1204,7 @@ bic_get_vr_ver(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, char *k
       syslog(LOG_WARNING, "%s():%d Failed to send command code to get vr ver. ret=%d", __func__,__LINE__, ret);
       goto error_exit;
     }
-    
+
     tbuf[2] = 0x2; //read cnt
     tbuf[3] = 0x43; //command code
     tlen = 4;
@@ -960,7 +1215,7 @@ bic_get_vr_ver(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, char *k
     }
     snprintf(ver_str, MAX_VALUE_LEN, "Infineon %02X%02X%02X%02X, Remaining Writes: %d", rbuf[3], rbuf[2], rbuf[1], rbuf[0], remaining_writes);
     kv_set(key, ver_str, 0, 0);
-    
+
   error_exit:
     rc = flock(fd, LOCK_UN);
     if (rc == -1) {
@@ -971,7 +1226,7 @@ bic_get_vr_ver(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, char *k
     close(fd);
     remove(path);
     return ret;
-    
+
   } else if ( rlen > 4 ) {
     //TI
     tbuf[2] = 0x02; //read cnt
@@ -982,7 +1237,7 @@ bic_get_vr_ver(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, char *k
       syslog(LOG_WARNING, "%s():%d Failed to send command code to get vr ver. ret=%d", __func__,__LINE__, ret);
       return ret;
     }
-    
+
     snprintf(ver_str, MAX_VALUE_LEN, "Texas Instruments %02X%02X", rbuf[1], rbuf[0]);
     kv_set(key, ver_str, 0, 0);
   } else {
@@ -1014,7 +1269,7 @@ bic_get_vr_ver(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, char *k
       syslog(LOG_WARNING, "%s():%d Failed to send command code to get vr ver. ret=%d", __func__,__LINE__, ret);
       return ret;
     }
-    
+
     snprintf(ver_str, MAX_VALUE_LEN, "Renesas %02X%02X%02X%02X, Remaining Writes: %d", rbuf[3], rbuf[2], rbuf[1], rbuf[0], remaining_writes);
     kv_set(key, ver_str, 0, 0);
   }
@@ -1028,7 +1283,7 @@ bic_get_vr_ver_cache(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, c
 
   snprintf(key, sizeof(key), "slot%x_vr_%02xh_crc", slot_id, addr);
   if (kv_get(key, tmp_str, NULL, 0)) {
-    
+
     if (bic_get_vr_ver(slot_id, intf, bus, addr, key, tmp_str))
       return -1;
   }
@@ -1036,7 +1291,7 @@ bic_get_vr_ver_cache(uint8_t slot_id, uint8_t intf, uint8_t bus, uint8_t addr, c
   if (snprintf(ver_str, MAX_VER_STR_LEN, "%s", tmp_str) > (MAX_VER_STR_LEN-1))
     return -1;
 
-  return 0;  
+  return 0;
 }
 
 int
@@ -1091,7 +1346,7 @@ bic_is_m2_exp_prsnt(uint8_t slot_id) {
   int val = 0;
 
   snprintf(key, sizeof(key), KV_SLOT_IS_M2_EXP_PRESENT, slot_id);
-  
+
   if (kv_get(key, tmp_str, NULL, 0)) {
     // get form bic
     tbuf[0] = 0x05; //bus id
@@ -1134,6 +1389,81 @@ bic_is_m2_exp_prsnt_cache(uint8_t slot_id) {
   int val = 0;
 
   snprintf(key, sizeof(key), KV_SLOT_IS_M2_EXP_PRESENT, slot_id);
+  if (kv_get(key, tmp_str, NULL, 0))
+    return -1;
+
+  val = atoi(tmp_str);
+  return val;
+}
+
+int
+bic_is_2u_top_bot_prsnt(uint8_t slot_id) {
+#define REG_CWC_CPLD_GPV3_PRSNT 0x04
+  char key[MAX_KEY_LEN] = {0};
+  char tmp_str[MAX_VALUE_LEN] = {0};
+  int val = 0;
+
+  snprintf(key, sizeof(key), KV_SLOT_IS_2U_TOPBOT_PRESENT, slot_id);
+  
+  if (kv_get(key, tmp_str, NULL, 0)) {
+    int i2cfd = BIC_STATUS_FAILURE;
+    int ret = BIC_STATUS_FAILURE;
+    uint8_t tbuf = 0x0;
+    uint8_t rbuf = 0x0;
+    uint8_t tlen = 0x0;
+    uint8_t rlen = 0x0;
+    uint8_t retry = MAX_READ_RETRY;
+
+    i2cfd = i2c_cdev_slave_open(FRU_SLOT1 + SLOT_BUS_BASE, CWC_CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
+    if ( i2cfd < 0 ) {
+      syslog(LOG_WARNING, "%s() Failed to open i2c device %d", __func__, CWC_CPLD_ADDRESS);
+      return i2cfd;
+    }
+
+    tbuf = REG_CWC_CPLD_GPV3_PRSNT;
+    tlen = 1;
+    rlen = 1;
+    do {
+      ret = i2c_rdwr_msg_transfer(i2cfd, CWC_CPLD_ADDRESS, &tbuf, tlen, &rbuf, rlen);
+      if ( ret < 0 ) {
+        msleep(100);
+      } else {
+        break;
+      }
+    } while( retry-- > 0 );
+
+    if ( ret < 0 ) {
+      syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer, tlen=%d", __func__, tlen);
+    } else {
+      if ( (rbuf & 0x03) == 0 ) {
+        val |= PRESENT_2U_TOP;
+      }
+      if ( (rbuf & 0x0C) == 0 ) {
+        val |= PRESENT_2U_BOT;
+      }
+    }
+
+    if ( i2cfd > 0 ) {
+      close(i2cfd);
+    }
+
+    snprintf(tmp_str, sizeof(tmp_str), "%d", val);
+    kv_set(key, tmp_str, 0, 0);
+    return val;
+  } else {
+    // get from cache
+    val = atoi(tmp_str);
+    return val;
+  }
+}
+
+int
+bic_is_2u_top_bot_prsnt_cache(uint8_t slot_id) {
+  char key[MAX_KEY_LEN] = {0};
+  char tmp_str[MAX_VALUE_LEN] = {0};
+  int val = 0;
+
+  snprintf(key, sizeof(key), KV_SLOT_IS_2U_TOPBOT_PRESENT, slot_id);
   if (kv_get(key, tmp_str, NULL, 0))
     return -1;
 
@@ -1316,8 +1646,31 @@ bic_get_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t *data) {
   index = (gpio / 8) + 3; //3 is the size of IANA ID
   pin = 1 << (gpio % 8);
   tbuf[index] = pin;
-  
+
   ret = bic_ipmb_wrapper(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_GET_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen);
+  *data = rbuf[3];
+  return ret;
+}
+
+int
+remote_bic_get_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t *data, uint8_t intf) {
+  uint8_t tbuf[13] = {0x00};
+  uint8_t rbuf[6] = {0x00};
+  uint8_t rlen = 0;
+  uint8_t tlen = sizeof(tbuf);
+  uint8_t index = 0;
+  uint8_t pin = 0;
+  int ret = 0;
+
+  // File the IANA ID
+  memcpy(tbuf, (uint8_t *)&IANA_ID, 3);
+
+  //get the buffer index
+  index = (gpio / 8) + 3; //3 is the size of IANA ID
+  pin = 1 << (gpio % 8);
+  tbuf[index] = pin;
+  
+  ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_GET_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen, intf);
   *data = rbuf[3];
   return ret;
 }
@@ -1342,6 +1695,29 @@ bic_set_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t data) {
   tbuf[13] = data & 0x1f;
 
   ret = bic_ipmb_wrapper(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_SET_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen);
+  return ret;
+}
+
+int
+remote_bic_set_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t data, uint8_t intf) {
+  uint8_t tbuf[14] = {0x00};
+  uint8_t rbuf[6] = {0x00};
+  uint8_t rlen = 0;
+  uint8_t tlen = sizeof(tbuf);
+  uint8_t index = 0;
+  uint8_t pin = 0;
+  int ret = 0;
+
+  // File the IANA ID
+  memcpy(tbuf, (uint8_t *)&IANA_ID, 3);
+
+  //get the buffer index
+  index = (gpio / 8) + 3; //3 is the size of IANA ID
+  pin = 1 << (gpio % 8);
+  tbuf[index] = pin;
+  tbuf[13] = data & 0x1f;
+
+  ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_SET_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen, intf);
   return ret;
 }
 
@@ -1407,6 +1783,43 @@ bic_get_gpio(uint8_t slot_id, bic_gpio_t *gpio, uint8_t intf) {
 
   // Ignore first 3 bytes of IANA ID
   memcpy((uint8_t*) gpio, &rbuf[3], rlen);
+
+ #ifdef ENABLE_INJECTION
+  // After getting the real values, check for injected vals
+  uint32_t i, bmask;
+  int fd, flen;
+  char fpath[30], fdata;
+  for (i = 0; i < MAX_GPIO_PINS; i++) {
+    sprintf(fpath, GPIO_FALSE_DIR, slot_id, i);
+    if (!access(fpath, F_OK)) {
+      fd = open(fpath, O_RDONLY);
+      if (fd == -1) {
+        syslog(LOG_WARNING, "Could not open bic injection file for gpio %d", i);
+        return -1;
+      }
+
+      flen = read(fd, &fdata, 1);
+      if (flen == 0) {
+        close(fd);
+        return -1;
+      }
+
+      int fret = close(fd);
+      if (fret) {
+        syslog(LOG_WARNING, "Failed to close bic injection file for gpio %d", i);
+        return -1;
+      }
+
+      // First set the bit to 0
+      bmask = 1 << (i % 32);
+      gpio->gpio[i/32] &= ~bmask;
+
+      // Now we can change it to whatever we want
+      gpio->gpio[i/32] |= (((fdata - 0x30) & 0x1) << (i % 32));
+      syslog(LOG_INFO, "Injected %d into gpio %d at slot %d", (fdata - 0x30), i, slot_id);
+    }
+  }
+#endif // ENABLE_INJECITON
 
   return ret;
 }
@@ -1483,7 +1896,7 @@ bic_set_fan_auto_mode(uint8_t crtl, uint8_t *status) {
 
   while (retry < 3) {
     ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_REQ, BIC_CMD_OEM_FAN_CTRL_STAT, tbuf, tlen, rbuf, &rlen, BB_BIC_INTF);
-    if (ret == 0) break; 
+    if (ret == 0) break;
     retry++;
   }
   if (ret != 0) {
@@ -1597,67 +2010,9 @@ bic_get_fan_pwm(uint8_t fan_id, float *value) {
   return 0;
 }
 
-// Only for class 2 system to prepare a SEL hdr
-static void
-bic_prepare_sel_hdr(IPMI_SEL_MSG *sel, uint8_t dir_type) {
-
-  // reset
-  memset(sel, 0, sizeof(IPMI_SEL_MSG));
-
-  // set
-  sel->netfn = NETFN_STORAGE_REQ;
-  sel->cmd = CMD_STORAGE_ADD_SEL;
-  sel->record_type = SEL_SYS_EVENT_RECORD;
-  sel->slave_addr = BRIDGE_SLAVE_ADDR << 1; // 8 bit
-  sel->rev = SEL_IPMI_V2_REV;
-  sel->snr_num = BIC_SENSOR_SYSTEM_STATUS; // the default sensor number
-  sel->event_dir_type = dir_type;
-
-  return;
-}
-
 // Only for class 2 system to get the power lock bit
 int
-bic_get_pwr_lock_flag(uint8_t *flag) {
-#define SB_CPLD_PWR_LOCK_REGISTER 0x10
-  int i2cfd = BIC_STATUS_FAILURE;
-  int ret = BIC_STATUS_FAILURE;
-  uint8_t tbuf = 0x0;
-  uint8_t rbuf = 0x0;
-  uint8_t tlen = 0x0;
-  uint8_t rlen = 0x0;
-  uint8_t retry = MAX_READ_RETRY;
-
-  i2cfd = i2c_cdev_slave_open(FRU_SLOT1 + SLOT_BUS_BASE, CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
-  if ( i2cfd < 0 ) {
-    syslog(LOG_WARNING, "%s() Failed to open %d", __func__, CPLD_ADDRESS);
-    return i2cfd;
-  }
-
-  tbuf = SB_CPLD_PWR_LOCK_REGISTER;
-  tlen = 1;
-  rlen = 1;
-  do {
-    ret = i2c_rdwr_msg_transfer(i2cfd, CPLD_ADDRESS, &tbuf, tlen, &rbuf, rlen);
-    if ( ret < 0 ) {
-      msleep(100);
-    } else break;
-  } while( retry-- > 0 );
-
-  if ( ret < 0 ) {
-    syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer, tlen=%d", __func__, tlen);
-  }
-
-  *flag = (rbuf == 0)?0x1:0x0; // rbuf = 0 means power lock flag is asserted
-
-  if ( i2cfd > 0 ) close(i2cfd);
-
-  return ret;
-}
-
-// Only for class 2 system to issue the power lock sel
-static int
-_set_pwr_lock_flag(uint8_t dir_type) {
+bic_set_crit_act_flag(uint8_t dir_type) {
   int ret = BIC_STATUS_SUCCESS;
   uint8_t tbuf[5] = {CPLD_BB_BUS, CPLD_FLAG_REG_ADDR, 0x0/*read cnt*/, 0x10/*base reg*/, 0x0/*data*/};
   uint8_t rbuf[5] = {0};
@@ -1686,95 +2041,6 @@ _set_pwr_lock_flag(uint8_t dir_type) {
 }
 
 int
-bic_notify_pwr_lock_sel(uint8_t dir_type) {
-  int ret = BIC_STATUS_SUCCESS;
-  IPMI_SEL_MSG sel = {0};
-
-  // prepare the sel
-  bic_prepare_sel_hdr(&sel, dir_type/*dir type*/);
-
-  // set sel's attribute
-  sel.snr_type = SEL_SNR_TYPE_PWR_LOCK;
-  sel.event_data[0] = SYS_SLED_PWR_LOCK;
-  sel.event_data[1] = dir_type;
-
-  ret = bic_bypass_to_another_bmc((uint8_t*)&sel, sizeof(sel));
-  if (ret < 0) {
-    // log the event to know the event is lost or not
-    syslog(LOG_WARNING, "%s(): failed to send power lock sel to another bmc", __func__);
-  }
-
-  // set BB CPLD
-  ret = _set_pwr_lock_flag(dir_type);
-  if ( ret < 0 ) {
-    syslog(LOG_WARNING, "%s(): failed to set power lock flag", __func__);
-  }
-
-  return ret;
-}
-
-// Only For Class 2
-int
-bic_notify_fan_mode(int mode) {
-  uint8_t tlen = 0;
-  uint8_t rlen = 0;
-  uint8_t tbuf[MAX_IPMB_REQ_LEN] = {0};
-  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
-  char iana_id[IANA_LEN] = {0x9c, 0x9c, 0x0};
-  BYPASS_MSG req = {0};
-  IPMI_SEL_MSG sel = {0};
-  GET_MB_INDEX_RESP resp = {0};
-  FAN_SERVICE_EVENT fan_event = {0};
-  int retry = 3;
-  char value[MAX_VALUE_LEN] = {0};
-  struct timespec ts;
-
-  // prepare the sel
-  bic_prepare_sel_hdr(&sel, SEL_ASSERT);
-
-  // set sel's attribute
-  sel.snr_type = SEL_SNR_TYPE_FAN;
-  fan_event.type = SYS_FAN_EVENT;
-
-  if (bic_ipmb_send(FRU_SLOT1, NETFN_OEM_REQ, BIC_CMD_OEM_GET_MB_INDEX, tbuf, 0, (uint8_t*) &resp, &rlen, BB_BIC_INTF) < 0) {
-    syslog(LOG_WARNING, "%s(): fail to get MB index", __func__);
-    return -1;
-  }
-  if (rlen == sizeof(GET_MB_INDEX_RESP)) {
-    fan_event.slot = resp.index;
-  } else {
-    fan_event.slot = UNKNOWN_SLOT;
-    syslog(LOG_WARNING, "%s(): wrong response while getting MB index", __func__);
-  }
-  
-  memcpy(req.iana_id, iana_id, MIN(sizeof(req.iana_id), sizeof(iana_id)));
-  req.bypass_intf = BMC_INTF;
-  fan_event.mode = mode;
-
-  memcpy(sel.event_data, (uint8_t*) &fan_event, MIN(sizeof(sel.event_data), sizeof(fan_event)));
-  memcpy(req.bypass_data, (uint8_t*) &sel, MIN(sizeof(req.bypass_data), sizeof(sel)));
-
-  tlen = sizeof(iana_id) + 1 + sizeof(sel); // IANA ID + interface + add SEL command
-
-  while (retry > 0) {
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, CMD_OEM_1S_MSG_OUT, (uint8_t*) &req, tlen, rbuf, &rlen, BB_BIC_INTF);
-    sleep(2);
-    kv_get("peer_bmc_ack_time", value, NULL, 0);
-    if (strtoul(value, NULL, 10) >= ts.tv_sec) {
-      break;
-    }
-    retry--;
-  }
-  // Another BMC might not alive if no response with retry 3 times, log it and keep going
-  if (retry == 0) {
-    syslog(LOG_WARNING, "%s(): fail to notify another BMC fan mode changed", __func__);
-  }
-
-  return 0;
-}
-
-int 
 bic_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *type) {
   int ret = 0;
   uint8_t retry = MAX_READ_RETRY;
@@ -1782,21 +2048,36 @@ bic_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *
   uint8_t ffi = 0 ,meff = 0 ,major_ver = 0, minor_ver = 0;
   uint8_t type_2ou = UNKNOWN_BOARD;
 
-  if ( (bic_is_m2_exp_prsnt(slot_id) & PRESENT_2OU) != PRESENT_2OU ) {
-    syslog(LOG_WARNING,"%s() Cannot get 2ou board", __func__);
-    *type = DEV_TYPE_UNKNOWN;
-    return -1;
+  if (slot_id == FRU_2U_TOP || slot_id == FRU_2U_BOT) {
+    type_2ou = CWC_MCHP_BOARD;
+  } else {
+    ret = bic_is_m2_exp_prsnt(slot_id);
+    if (ret < 0) {
+      syslog(LOG_WARNING,"%s() Failed to get 1ou & 2ou present status", __func__);
+      goto err_out;
+    }
+    if ( (ret & PRESENT_2OU) != PRESENT_2OU ) {
+      syslog(LOG_WARNING,"%s() Cannot get 2ou board", __func__);
+      goto err_out;
+    }
+    ret = fby3_common_get_2ou_board_type(slot_id, &type_2ou);
+    if ( ret < 0 ) {
+      syslog(LOG_WARNING,"%s() Cannot get 2ou board type", __func__);
+      goto err_out;
+    }
   }
-  ret = fby3_common_get_2ou_board_type(slot_id, &type_2ou);
-  if ( ret < 0 ) {
-    syslog(LOG_WARNING,"%s() Cannot get 2ou board type", __func__);
-    *type = DEV_TYPE_UNKNOWN;
-    return -1;
-  }
-  if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
+  if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD || type_2ou == CWC_MCHP_BOARD ) {
 
     while (retry) {
-      ret = bic_get_dev_power_status(slot_id, dev_id, nvme_ready, status, &ffi, &meff, &vendor_id, &major_ver,&minor_ver, REXP_BIC_INTF);
+      if (slot_id == FRU_2U_TOP) {
+        ret = bic_get_dev_power_status(FRU_SLOT1, dev_id, nvme_ready, status, &ffi, &meff, 
+                                      &vendor_id, &major_ver,&minor_ver, RREXP_BIC_INTF1);
+      } else if (slot_id == FRU_2U_BOT) {
+        ret = bic_get_dev_power_status(FRU_SLOT1, dev_id, nvme_ready, status, &ffi, &meff, 
+                                      &vendor_id, &major_ver,&minor_ver, RREXP_BIC_INTF2);
+      } else {
+        ret = bic_get_dev_power_status(slot_id, dev_id, nvme_ready, status, &ffi, &meff, &vendor_id, &major_ver,&minor_ver, REXP_BIC_INTF);
+      }
       if (!ret)
         break;
       msleep(50);
@@ -1827,8 +2108,8 @@ bic_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *
     return 0;
   }
 
+err_out:
   *type = DEV_TYPE_UNKNOWN;
-
   return -1;
 }
 
@@ -1856,6 +2137,8 @@ bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, u
       syslog(LOG_ERR, "%s() Cannot get 2ou board_type", __func__);
       board_type = M2_BOARD;
     }
+  } else if (intf == RREXP_BIC_INTF1 || intf == RREXP_BIC_INTF2) {
+    board_type = M2_BOARD;
   } else {
     return -1;
   }
@@ -1867,23 +2150,36 @@ bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, u
     tbuf[3] = mapping_e1s_pwr[table][dev_id - 1];
   } else if (board_type == E1S_BOARD) {
     // case 2OU E1S
-    tbuf[3] = mapping_e1s_pwr[table][dev_id - 1] + 1; // device ID 1 based in power control 
+    tbuf[3] = mapping_e1s_pwr[table][dev_id - 1] + 1; // device ID 1 based in power control
   } else {
     // case 1/2OU M.2
-    tbuf[3] = dev_id;
+    if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+      tbuf[3] = dev_id - DUAL_DEV_ID0_2OU + DUAL_DEV_BIC_ID0;
+    } else {
+      tbuf[3] = dev_id;
+    }
   }
 
   tbuf[4] = 0x3;  //get power status
   ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_DEV_POWER, tbuf, tlen, rbuf, &rlen, intf);
 
-  // Ignore first 3 bytes of IANA ID
-  *status = rbuf[3];
-  *nvme_ready = (intf == REXP_BIC_INTF)?rbuf[4]:0x1; //1 is assigned directly. for REXP_EXP_INTF, we assige it from rbuf[4]
-  if ( ffi != NULL ) *ffi = rbuf[5];   // FFI_0 0:Storage 1:Accelerator
-  if ( meff != NULL ) *meff = rbuf[6];  // MEFF  0x35: M.2 22110 0xF0: Dual M.2
-  if ( vendor_id != NULL ) *vendor_id = (rbuf[7] << 8 ) | rbuf[8]; // PCIe Vendor ID
-  if ( major_ver != NULL ) *major_ver = rbuf[9];  //FW version Major Revision
-  if ( minor_ver != NULL ) *minor_ver = rbuf[10]; //FW version Minor Revision
+  if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) { //dual m.2 sitauation, it will return two byte.
+    status[0] = rbuf[3];
+    status[1] = rbuf[4];
+  } else {
+    // Ignore first 3 bytes of IANA ID
+    *status = rbuf[3];
+    if (intf == REXP_BIC_INTF || intf == RREXP_BIC_INTF1 || intf == RREXP_BIC_INTF2) {
+      *nvme_ready = rbuf[4]; //1 is assigned directly. for REXP_EXP_INTF, we assige it from rbuf[4]
+    } else {
+      *nvme_ready = 0x1;
+    }
+    if ( ffi != NULL ) *ffi = rbuf[5];   // FFI_0 0:Storage 1:Accelerator
+    if ( meff != NULL ) *meff = rbuf[6];  // MEFF  0x35: M.2 22110 0xF0: Dual M.2
+    if ( vendor_id != NULL ) *vendor_id = (rbuf[7] << 8 ) | rbuf[8]; // PCIe Vendor ID
+    if ( major_ver != NULL ) *major_ver = rbuf[9];  //FW version Major Revision
+    if ( minor_ver != NULL ) *minor_ver = rbuf[10]; //FW version Minor Revision
+  }
 
   return ret;
 }
@@ -1918,6 +2214,9 @@ bic_set_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t status, uint8_
 
       // No VPP and hotplug on GPv3, skip it
       if ( board_type == GPV3_MCHP_BOARD || board_type == GPV3_BRCM_BOARD ) break;
+    } else if (intf == RREXP_BIC_INTF1 || intf == RREXP_BIC_INTF2) {
+      board_type = M2_BOARD;
+      break;
     } else {
       return -1;
     }
@@ -1972,10 +2271,14 @@ bic_set_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t status, uint8_
     tbuf[3] = mapping_e1s_pwr[table][dev_id - 1];
   } else if (board_type == E1S_BOARD) {
     // case 2OU E1S
-    tbuf[3] = mapping_e1s_pwr[table][dev_id - 1] + 1; // device ID 1 based in power control 
+    tbuf[3] = mapping_e1s_pwr[table][dev_id - 1] + 1; // device ID 1 based in power control
   } else {
     // case 1/2OU M.2
-    tbuf[3] = dev_id;
+    if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+      tbuf[3] = dev_id - DUAL_DEV_ID0_2OU + DUAL_DEV_BIC_ID0;
+    } else {
+      tbuf[3] = dev_id;
+    }
   }
 
   tbuf[4] = status;  //set power status
@@ -2007,14 +2310,13 @@ bic_master_write_read(uint8_t slot_id, uint8_t bus, uint8_t addr, uint8_t *wbuf,
 }
 
 int
-bic_reset(uint8_t slot_id) {
+bic_reset(uint8_t slot_id, uint8_t intf) {
   uint8_t tbuf[3] = {0x9c, 0x9c, 0x00}; // IANA ID
   uint8_t rbuf[8] = {0x00};
   uint8_t rlen = 0;
-  int ret;
+  int ret = BIC_STATUS_FAILURE;
 
-  ret = bic_ipmb_wrapper(slot_id, NETFN_APP_REQ, CMD_APP_COLD_RESET, tbuf, 0, rbuf, &rlen);
-
+  ret = bic_ipmb_send(slot_id, NETFN_APP_REQ, CMD_APP_COLD_RESET, tbuf, 0, rbuf, &rlen, intf);
   return ret;
 }
 
@@ -2078,23 +2380,37 @@ bic_get_mb_index(uint8_t *index) {
   GET_MB_INDEX_RESP resp = {0};
   uint8_t rlen = 0;
   uint8_t tbuf[MAX_IPMB_REQ_LEN] = {0};
+  char key[MAX_KEY_LEN] = {0};
+  char tmp_str[MAX_VALUE_LEN] = {0};
+
+  snprintf(key, sizeof(key), KV_MB_INDEX);
 
   if (index == NULL) {
     syslog(LOG_WARNING, "%s(): invalid index parameter", __func__);
     return -1;
   }
-  memset(tbuf, 0, sizeof(tbuf));
-  memset(&resp, 0, sizeof(resp));
-  if (bic_ipmb_send(FRU_SLOT1, NETFN_OEM_REQ, BIC_CMD_OEM_GET_MB_INDEX, tbuf, 0, (uint8_t*) &resp, &rlen, BB_BIC_INTF) < 0) {
-    syslog(LOG_WARNING, "%s(): fail to get MB index", __func__);
-    return -1;
+
+  if (kv_get(key, tmp_str, NULL, 0)) {
+    memset(tbuf, 0, sizeof(tbuf));
+    memset(&resp, 0, sizeof(resp));
+    if (bic_ipmb_send(FRU_SLOT1, NETFN_OEM_REQ, BIC_CMD_OEM_GET_MB_INDEX, tbuf, 0, (uint8_t*) &resp, &rlen, BB_BIC_INTF) < 0) {
+      syslog(LOG_WARNING, "%s(): fail to get MB index", __func__);
+      return -1;
+    }
+    if (rlen == sizeof(GET_MB_INDEX_RESP)) {
+      *index = resp.index;
+    } else {
+      syslog(LOG_WARNING, "%s(): wrong response length (%d), while getting MB index, expected = %d", 
+            __func__, rlen, sizeof(GET_MB_INDEX_RESP));
+      return -1;
+    }
+
+    snprintf(tmp_str, sizeof(tmp_str), "%d", *index);
+    kv_set(key, tmp_str, 0, 0);
   }
-  if (rlen == sizeof(GET_MB_INDEX_RESP)) {
-    *index = resp.index;
-  } else {
-    syslog(LOG_WARNING, "%s(): wrong response length (%d), while getting MB index, expected = %d", 
-          __func__, rlen, sizeof(GET_MB_INDEX_RESP));
-    return -1;
+  else {
+    // get from cache
+    *index = atoi(tmp_str);
   }
 
   return 0;
@@ -2129,105 +2445,4 @@ bic_bypass_to_another_bmc(uint8_t* data, uint8_t len) {
   }
 
   return 0;
-}
-
-// For class 2 system, notify another BMC the BB fw is updating
-int
-bic_set_bb_fw_update_ongoing(uint8_t component, uint8_t option) {
-  IPMI_SEL_MSG sel = {0};
-  BB_FW_UPDATE_EVENT update_event = {0};
-  int ret = 0;
-  int retry = 3;
-  char value[MAX_VALUE_LEN] = {0};
-  struct timespec ts;
-
-  memset(&update_event, 0, sizeof(update_event));
-
-  // prepare the sel
-  bic_prepare_sel_hdr(&sel, option/*dir type*/);
-
-  // set sel's attribute
-  sel.snr_type = SEL_SNR_TYPE_FW_STAT;
-  update_event.type = SYS_BB_FW_UPDATE;
-  update_event.component = component;
-
-  memcpy(sel.event_data, (uint8_t*) &update_event, MIN(sizeof(sel.event_data), sizeof(update_event)));
-  while (retry > 0) {
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    bic_bypass_to_another_bmc((uint8_t*)&sel, sizeof(sel));
-    sleep(2);
-    kv_get("peer_bmc_ack_time", value, NULL, 0);
-    if (strtoul(value, NULL, 10) >= ts.tv_sec) {
-      break;
-    }
-    retry--;
-  }
-
-  // Another BMC might not alive if no response with retry 3 times, log it and keep going
-  if (retry == 0) {
-    syslog(LOG_WARNING, "%s(): failed to set update flag to another bmc", __func__);
-    ret = 0;
-  }
-
-  return ret;
-}
-
-// For class 2 system, check BB fw update status to avoid updating at the same time
-int
-bic_check_bb_fw_update_ongoing() {
-  uint8_t mb_index = 0;
-  int ret = 0;
-  char update_stat[MAX_VALUE_LEN] = {0};
-  
-  // if key exist, BB fw is updating by another slot
-  if (access(BB_FW_UPDATE_STAT_FILE, F_OK) == 0) {
-    if (kv_get("bb_fw_update", update_stat, NULL, 0) != 0) {
-      printf("Fail to get BB firmware update status\n");
-      strncpy(update_stat, "unknown", sizeof(update_stat));
-    }    
-    printf("BB firmware: %s update is ongoing\n", update_stat);
-    return -1;
-  }
-
-  //to avoid the case that two BMCs run the update command at the same time.
-  //delay the checking time according to MB index
-  ret = bic_get_mb_index(&mb_index);
-  if (ret < 0) {
-    printf("Fail to get MB index\n");
-    return -1;
-  }
-  sleep(mb_index);
-
-  if (access(BB_FW_UPDATE_STAT_FILE, F_OK) == 0) {
-    if (kv_get("bb_fw_update", update_stat, NULL, 0) != 0) {
-      printf("Fail to get BB firmware update status\n");
-      strncpy(update_stat, "unknown", sizeof(update_stat));
-    }    
-    printf("BB firmware: %s update is ongoing\n", update_stat);
-    return -1;
-  }
-
-  return 0;
-}
-
-int
-bic_ack_sel(uint8_t event) {
-  int ret = BIC_STATUS_SUCCESS;
-  IPMI_SEL_MSG sel = {0};
-
-  // prepare the sel
-  bic_prepare_sel_hdr(&sel, SEL_ASSERT/*dir type*/);
-
-  // set sel's attribute
-  sel.snr_type = SEL_SNR_TYPE_ACK_SEL;
-  sel.event_data[0] = SYS_SEL_ACK;
-  sel.event_data[1] = event;
-
-  ret = bic_bypass_to_another_bmc((uint8_t*)&sel, sizeof(sel));
-  if (ret < 0) {
-    // log the event to know the event is lost or not
-    syslog(LOG_WARNING, "%s(): failed to send ack sel to another bmc", __func__);
-  }
-
-  return ret;
 }

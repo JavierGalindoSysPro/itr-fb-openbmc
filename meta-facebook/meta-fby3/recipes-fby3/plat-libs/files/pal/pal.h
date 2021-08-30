@@ -66,6 +66,10 @@ extern "C" {
 
 #define MAX_SNR_NAME 32
 
+#define DP_HBA_FAN_TBL_PATH "/etc/FSC_CLASS1_DVT_DP_HBA.json"
+#define DEFAULT_FSC_CFG_PATH "/etc/fsc-config.json"
+
+
 extern const char pal_fru_list_print[];
 extern const char pal_fru_list_rw[];
 extern const char pal_fru_list_sensor_history[];
@@ -81,6 +85,8 @@ extern const char pal_dev_fru_list[];
 extern const char pal_dev_pwr_list[];
 extern const char pal_dev_pwr_option_list[];
 extern const char pal_fan_opt_list[];
+extern const char pal_fru_exp_list[];
+extern const char pal_m2_dual_list[];
 
 enum {
   LED_LOCATE_MODE = 0x0,
@@ -111,12 +117,15 @@ enum {
   CONFIG_B = 0x02,
   CONFIG_C = 0x03,
   CONFIG_D = 0x04,
-  CONFIG_B_E1S = 0x05,
+  CONFIG_B_E1S_T10 = 0x05,
   CONFIG_C_GPV3 = 0x06,
   CONFIG_D_GPV3 = 0x07,
   CONFIG_D_DP_X16 = 0x08,
   CONFIG_D_DP_X8 = 0x09,
   CONFIG_D_DP_X4 = 0x0a,
+  CONFIG_B_E1S_T3 = 0x0b,
+  CONFIG_C_CWC_SINGLE = 0x0c,
+  CONFIG_C_CWC_DUAL = 0x0d,
   CONFIG_UNKNOWN = 0xff,
 };
 
@@ -129,6 +138,8 @@ enum {
   MANUAL_MODE  = 0x00,
   AUTO_MODE    = 0x01,
   GET_FAN_MODE = 0x02,
+  WAKEUP_MODE  = 0x03,
+  SLEEP_MODE   = 0x04,
 };
 
 #define MAX_NODES     (4)
@@ -198,6 +209,12 @@ enum {
   DEV_FRU_IGNORE,
 };
 
+//HBA card information
+enum {
+  HBA_VID = 0x1077, // QLogic Corp.
+  HBA_DID = 0x2071, // ISP2714-based 16/32Gb Fibre Channel to PCIe Adapter
+};
+
 typedef struct {
   uint8_t err_id;
   char *err_des;
@@ -209,6 +226,7 @@ extern err_t minor_auth_error[];
 extern err_t minor_update_error[];
 
 int pal_get_uart_select_from_cpld(uint8_t *uart_select);
+int pal_get_uart_select_from_kv(uint8_t *uart_select);
 int pal_check_pfr_mailbox(uint8_t fru);
 int set_pfr_i2c_filter(uint8_t slot_id, uint8_t value);
 int pal_check_sled_mgmt_cbl_id(uint8_t slot_id, uint8_t *cbl_val, bool log_evnt, uint8_t bmc_location);
@@ -220,6 +238,12 @@ int pal_is_debug_card_prsnt(uint8_t *status);
 int pal_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *type);
 int pal_check_slot_cpu_present(uint8_t slot_id);
 int pal_gpv3_mux_select(uint8_t slot_id, uint8_t dev_id);
+int pal_dp_hba_fan_table_check(void);
+int pal_get_bb_fw_info(unsigned char target, char* ver_str);
+int pal_is_cwc(void);
+int pal_get_cwc_id(char *str, uint8_t *fru);
+bool pal_get_crit_act_status(int fd);
+bool pal_is_fan_manual_mode(uint8_t slot_id);
 #ifdef __cplusplus
 } // extern "C"
 #endif

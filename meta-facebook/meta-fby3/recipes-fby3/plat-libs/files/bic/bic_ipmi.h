@@ -48,6 +48,15 @@ enum {
   VENDOR_SPH = 0x8086,
 };
 
+enum {
+  SET_LED_OFF = 0x0,
+  SET_LED_ON = 0x1, 
+  SET_LED_BLINK_START = 0x2,
+  SET_LED_BLINK_STOP = 0x3,
+  GET_LED_STAT = 0x4,
+  CMD_UNKNOWN = 0xff,
+};
+
 #define MAX_READ_RETRY 5
 
 int bic_get_dev_id(uint8_t slot_id, ipmi_dev_id_t *dev_id, uint8_t intf);
@@ -60,6 +69,8 @@ int bic_get_fw_ver(uint8_t slot_id, uint8_t comp, uint8_t *ver);
 int bic_get_1ou_type(uint8_t slot_id, uint8_t *type);
 int bic_get_1ou_type_cache(uint8_t slot_id, uint8_t *type);
 int bic_set_amber_led(uint8_t slot_id, uint8_t dev_id, uint8_t status);
+int bic_get_amber_led_status(uint8_t slot_id, uint8_t dev_id, uint8_t *status);
+int bic_spe_led_ctrl(uint8_t dev_id, uint8_t option, uint8_t* status);
 int bic_get_80port_record(uint8_t slot_id, uint8_t *rbuf, uint8_t *rlen, uint8_t intf);
 int bic_get_cpld_ver(uint8_t slot_id, uint8_t comp, uint8_t *ver, uint8_t bus, uint8_t addr, uint8_t intf);
 int bic_get_vr_device_id(uint8_t slot_id, uint8_t comp, uint8_t *rbuf, uint8_t *rlen, uint8_t bus, uint8_t addr, uint8_t intf);
@@ -77,7 +88,9 @@ int remote_bic_set_gpio(uint8_t slot_id, uint8_t gpio_num,uint8_t value, uint8_t
 int bic_get_one_gpio_status(uint8_t slot_id, uint8_t gpio_num, uint8_t *value);
 int bic_asd_init(uint8_t slot_id, uint8_t cmd);
 int bic_get_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t *data);
+int remote_bic_get_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t *data, uint8_t intf);
 int bic_set_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t data);
+int remote_bic_set_gpio_config(uint8_t slot_id, uint8_t gpio, uint8_t data, uint8_t intf);
 int bic_get_sys_guid(uint8_t slot_id, uint8_t *guid);
 int bic_set_sys_guid(uint8_t slot_id, uint8_t *guid);
 int bic_do_sled_cycle(uint8_t slot_id);
@@ -92,22 +105,21 @@ int bic_get_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_read
 int bic_set_dev_power_status(uint8_t slot_id, uint8_t dev_id, uint8_t status, uint8_t intf);
 int bic_get_ifx_vr_remaining_writes(uint8_t slot_id, uint8_t bus, uint8_t addr, uint8_t *writes, uint8_t intf);
 int bic_get_isl_vr_remaining_writes(uint8_t slot_id, uint8_t bus, uint8_t addr, uint8_t *writes, uint8_t intf);
-int bic_reset(uint8_t slot_id);
+int bic_reset(uint8_t slot_id, uint8_t intf);
 int bic_clear_cmos(uint8_t slot_id);
 int bic_inform_sled_cycle(void);
 int bic_enable_ssd_sensor_monitor(uint8_t slot_id, bool enable, uint8_t intf);
 int bic_enable_vr_fault_monitor(uint8_t slot_id, bool enable, uint8_t intf) ;
 uint8_t get_gpv3_bus_number(uint8_t dev_id);
 uint8_t get_gpv3_channel_number(uint8_t dev_id);
-int bic_notify_fan_mode(int mode);
 int bic_get_dp_pcie_config(uint8_t slot_id, uint8_t *pcie_config);
-int bic_set_bb_fw_update_ongoing(uint8_t component, uint8_t option);
-int bic_check_bb_fw_update_ongoing();
+bool bic_is_fw_update_ongoing(uint8_t fruid);
+bool bic_is_crit_act_ongoing(uint8_t fruid);
 int bic_get_mb_index(uint8_t *index);
 int bic_bypass_to_another_bmc(uint8_t* data, uint8_t len);
-int bic_notify_pwr_lock_sel(uint8_t dir_type);
-int bic_get_pwr_lock_flag(uint8_t *flag);
-int bic_ack_sel(uint8_t event);
+int bic_set_crit_act_flag(uint8_t dir_type);
+int bic_is_2u_top_bot_prsnt(uint8_t slot_id);
+int bic_is_2u_top_bot_prsnt_cache(uint8_t slot_id);
 
 #ifdef __cplusplus
 } // extern "C"

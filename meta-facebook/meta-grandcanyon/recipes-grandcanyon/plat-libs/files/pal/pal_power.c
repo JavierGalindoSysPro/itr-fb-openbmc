@@ -16,12 +16,15 @@
 #include <facebook/fbgc_gpio.h>
 #include "pal.h"
 
+#define MAX_CMD_LEN 64
+
 static int
 server_power_12v_on() {
   int i2cfd = 0;
   uint8_t status = 0;
   int ret = 0, retry = 0, times = 0;
   i2c_master_rw_command command;
+  char cmd[MAX_CMD_LEN] = {0};
   
   memset(&command, 0, sizeof(command));
   command.offset = 0x00;
@@ -51,8 +54,15 @@ server_power_12v_on() {
   while(times < WAIT_POWER_STATUS_CHANGE_TIME) {
     ret = pal_get_server_12v_power(FRU_SERVER, &status);
     if ((ret == 0) && (status == SERVER_12V_ON)) {
+      // store VR version to cache
+      snprintf(cmd, sizeof(cmd), "/usr/bin/fw-util server --version vr > /dev/null 2>&1");
+      if (system(cmd) != 0) {
+        syslog(LOG_WARNING, "%s(): get VR version failed\n", __func__);
+        ret = PAL_ENOTSUP;
+      }
       goto exit;
     } else {
+      ret = -1;
       times++;
       sleep(1);
     }
@@ -72,6 +82,7 @@ server_power_12v_off() {
   uint8_t status = 0;
   int ret = 0, retry = 0, times = 0;
   i2c_master_rw_command command;
+  char cmd[MAX_CMD_LEN] = {0};
   
   memset(&command, 0, sizeof(command));
   command.offset = 0x00;
@@ -101,8 +112,15 @@ server_power_12v_off() {
   while(times < WAIT_POWER_STATUS_CHANGE_TIME) {
     ret = pal_get_server_12v_power(FRU_SERVER, &status);
     if ((ret == 0) && (status == SERVER_12V_OFF)) {
+      // clear VR verison cache
+      snprintf(cmd, sizeof(cmd), "rm -f /tmp/cache_store/vr_*_crc");
+      if (system(cmd) != 0) {
+        syslog(LOG_WARNING, "%s(): remove VR version cache failed\n", __func__);
+        ret = PAL_ENOTSUP;
+      }
       goto exit;
     } else {
+      ret = -1;
       times++;
       sleep(1);
     }
@@ -161,7 +179,8 @@ void
 pal_get_chassis_status(uint8_t fru, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len) {
   char buff[MAX_VALUE_LEN] = {0};
   int policy = POWER_CFG_UKNOWN;
-  uint8_t status = 0, ret = 0;
+  uint8_t status = 0;
+  int ret = 0;
   unsigned char *data = res_data;
 
   if (res_data == NULL) {
@@ -238,8 +257,8 @@ set_nic_power_mode(nic_power_control_mode nic_mode) {
   return ret;
 }
 
-static int
-power_off_pre_actions() {
+int
+pal_host_power_off_pre_actions() {
   if (gpio_set_init_value_by_shadow(fbgc_get_gpio_name(GPIO_E1S_1_P3V3_PG_R), GPIO_VALUE_LOW) < 0) {
     syslog(LOG_ERR, "%s() Failed to disable E1S0/IOCM I2C\n", __func__);
     return -1;
@@ -252,8 +271,8 @@ power_off_pre_actions() {
   return 0;
 }
 
-static int
-power_off_post_actions() {
+int
+pal_host_power_off_post_actions() {
   int ret = 0;
 
   ret = set_nic_power_mode(NIC_VAUX_MODE);
@@ -264,8 +283,8 @@ power_off_post_actions() {
   return ret;
 }
 
-static int
-power_on_pre_actions() {
+int
+pal_host_power_on_pre_actions() {
   int ret = 0;
 
   ret = set_nic_power_mode(NIC_VMAIN_MODE);
@@ -276,8 +295,20 @@ power_on_pre_actions() {
   return ret;
 }
 
-static int
-power_on_post_actions() {
+int
+pal_restore_host_power_on_pre_actions() {
+  int ret = 0;
+
+  ret = set_nic_power_mode(NIC_VAUX_MODE);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s() Failed to set NIC to VAUX mode\n", __func__);
+  }
+
+  return ret;
+}
+
+int
+pal_host_power_on_post_actions() {
   char path[MAX_PATH_LEN] = {0};
   int ret = 0;
   uint8_t chassis_type = 0;
@@ -322,8 +353,21 @@ power_on_post_actions() {
   return 0;
 }
 
+static int
+power_12v_on_post_actions() {
+  int ret = 0;
+  
+  // Update Server FPGA version
+  ret = pal_set_fpga_ver_cache(I2C_BS_FPGA_BUS, GET_FPGA_VER_ADDR);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "%s(): Failed to update Server FPGA version", __func__);
+  }
+  
+  return ret;
+}
+
 int
-pal_get_server_12v_power(uint8_t fru_id, uint8_t *status) {
+pal_get_server_12v_power(uint8_t fru, uint8_t *status) {
   int ret = 0;
   uint8_t status_12v = 0;
   int i2cfd = 0, retry = 0;
@@ -394,7 +438,14 @@ pal_get_server_12v_power(uint8_t fru_id, uint8_t *status) {
 
 int
 pal_get_server_power(uint8_t fru, uint8_t *status) {
-  int ret = 0;
+  int ret = 0, i2cfd = 0;
+  char server_fpga_ver[MAX_VALUE_LEN] = {0};
+  char server_fpga_stage[MAX_VALUE_LEN] = {0};
+  char server_fpga_ver_num[MAX_VALUE_LEN] = {0};
+  bool is_ctrl_via_bic = true;
+  i2c_master_rw_command command;
+  uint8_t res = 0;
+  int rlen = sizeof(res);
   
   if (status == NULL) {
     syslog(LOG_WARNING, "%s() NULL pointer: *status", __func__);
@@ -411,12 +462,45 @@ pal_get_server_power(uint8_t fru, uint8_t *status) {
     // return earlier if power state is SERVER_12V_OFF or error happened
     return ret;
   }
+  
+  ret = pal_get_fpga_ver_cache(I2C_BS_FPGA_BUS, GET_FPGA_VER_ADDR, server_fpga_ver);
+  if (ret == 0) {
+    snprintf(server_fpga_stage, sizeof(server_fpga_stage), "%c%c", server_fpga_ver[4], server_fpga_ver[5]);
+    snprintf(server_fpga_ver_num, sizeof(server_fpga_ver_num), "%c%c", server_fpga_ver[6], server_fpga_ver[7]);
+    
+    if (((strcmp(server_fpga_stage, "0D") == 0) && (atoi(server_fpga_ver_num) >= 0x02))
+      || (strcmp(server_fpga_stage, "0A") == 0)) {
+      is_ctrl_via_bic = false;
+    }
+  }
 
-  ret = bic_get_server_power_status(status);
-  if (ret < 0) {
-    // if bic not responding, we reset status to SERVER_12V_ON
-    *status = SERVER_12V_ON;
-    syslog(LOG_WARNING, "%s(): BIC no response, server DC power status is unknown\n", __func__);
+  if (is_ctrl_via_bic == false) {
+    i2cfd = i2c_cdev_slave_open(I2C_BS_FPGA_BUS, BS_FPGA_SLAVE_ADDR >> 1, I2C_SLAVE_FORCE_CLAIM);
+    if (i2cfd < 0) {
+      syslog(LOG_ERR, "Fail to control server power because I2C BUS: %d open failed", I2C_BS_FPGA_BUS);
+      return i2cfd;
+    }
+  
+    memset(&command, 0, sizeof(command));
+    command.offset = BS_FPGA_SERVER_POWER_STATUS;
+  
+    ret = i2c_rdwr_msg_transfer(i2cfd, BS_FPGA_SLAVE_ADDR, (uint8_t *)&command.offset, sizeof(command.offset), &res, rlen);
+    close(i2cfd);
+    
+    *status = GETBIT(res, 0);
+    if (ret < 0) {
+      // if server FPGA not responding, we reset status to SERVER_12V_ON
+      *status = SERVER_12V_ON;
+      syslog(LOG_WARNING, "%s(): SERVER FPGA no response, server DC power status is unknown\n", __func__);
+    }
+    
+  } else {
+    ret = bic_get_server_power_status(status);
+    if (ret < 0) {
+      // if bic not responding, we reset status to SERVER_12V_ON
+      *status = SERVER_12V_ON;
+      syslog(LOG_WARNING, "%s(): BIC no response, server DC power status is unknown\n", __func__);
+    }
   }
 
   return 0;
@@ -427,6 +511,10 @@ int
 pal_set_server_power(uint8_t fru, uint8_t cmd) {
   uint8_t status = 0;
   int ret = 0;
+  bool is_ctrl_via_bic = true;
+  char server_fpga_ver[MAX_VALUE_LEN] = {0};
+  char server_fpga_stage[MAX_VALUE_LEN] = {0};
+  char server_fpga_ver_num[MAX_VALUE_LEN] = {0};
 
   if (fru != FRU_SERVER) {
     syslog(LOG_WARNING, "%s: fru %u not a server\n", __func__, fru);
@@ -436,6 +524,24 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
   if (pal_get_server_power(fru, &status) < 0) {
     syslog(LOG_WARNING, "%s: fru %u get sever power error %u\n", __func__, fru, status);
     return POWER_STATUS_ERR;
+  }
+  
+  // Check Server FPGA f/w version
+  // (1)new: BMC control directly (2)old: control via BIC
+  ret = pal_get_fpga_ver_cache(I2C_BS_FPGA_BUS, GET_FPGA_VER_ADDR, server_fpga_ver);
+  if (ret == 0) {
+    snprintf(server_fpga_stage, sizeof(server_fpga_stage), "%c%c", server_fpga_ver[4], server_fpga_ver[5]);
+    snprintf(server_fpga_ver_num, sizeof(server_fpga_ver_num), "%c%c", server_fpga_ver[6], server_fpga_ver[7]);
+    
+    // after stage: DVT num: 02 support BMC control directly
+    if (((strcmp(server_fpga_stage, "0D") == 0) && (atoi(server_fpga_ver_num) >= 0x02))
+      || (strcmp(server_fpga_stage, "0A") == 0)) {
+      is_ctrl_via_bic = false;
+    }
+  }
+  
+  if (is_ctrl_via_bic == true) {
+    printf("Warning: Server FPGA fw version is too old, please update\n");
   }
 
   // Discard all the non-12V power control commands if 12V is off
@@ -458,13 +564,23 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       if (status == SERVER_POWER_ON) {
         return POWER_STATUS_ALREADY_OK;
       }
-      ret = power_on_pre_actions();
+      ret = pal_host_power_on_pre_actions();
       if (ret < 0) {
         return POWER_STATUS_ERR;
       }
-      ret = bic_server_power_ctrl(SET_DC_POWER_ON);
+      
+      if (is_ctrl_via_bic == true) {
+        ret = bic_server_power_ctrl(SET_DC_POWER_ON);
+      } else {
+        ret = pal_server_power_ctrl(SET_DC_POWER_ON);
+      }
+      
       if (ret == 0) {
-        power_on_post_actions();
+        ret = pal_check_server_power_change_correct(SET_DC_POWER_ON);
+      }
+
+      if (ret == 0) {
+        pal_host_power_on_post_actions();
       }
       return ret;
       
@@ -472,28 +588,54 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       if (status == SERVER_POWER_OFF) {
         return POWER_STATUS_ALREADY_OK;
       }
-      if (power_off_pre_actions() < 0 ) {
+      if (pal_host_power_off_pre_actions() < 0 ) {
         return POWER_STATUS_ERR;
       }
-      ret = bic_server_power_ctrl(SET_DC_POWER_OFF);
+
+      if (is_ctrl_via_bic == true) {
+        ret = bic_server_power_ctrl(SET_DC_POWER_OFF);
+      } else {
+        ret = pal_server_power_ctrl(SET_DC_POWER_OFF);
+      }
+      
       if (ret == 0) {
-        power_off_post_actions();
+        ret = pal_check_server_power_change_correct(SET_DC_POWER_OFF);
+      }
+      
+      if (ret == 0) {
+        pal_host_power_off_post_actions();
       }
       return ret;
 
     case SERVER_POWER_CYCLE:
       if (status == SERVER_POWER_ON) {
-        if (power_off_pre_actions() < 0 ) {
+        if (pal_host_power_off_pre_actions() < 0 ) {
           return POWER_STATUS_ERR;
         }
-        ret = bic_server_power_cycle();
+        
+        if (is_ctrl_via_bic == true) {
+          ret = bic_server_power_cycle();
+        } else {
+          ret = pal_server_power_cycle();
+        }
+        
         if (ret == 0) {
-          power_on_post_actions();
+          pal_host_power_on_post_actions();
         }
       }
-      ret = bic_server_power_ctrl(SET_DC_POWER_ON);
+      
+      if (is_ctrl_via_bic == true) {
+        ret = bic_server_power_ctrl(SET_DC_POWER_ON);
+      } else {
+        ret = pal_server_power_ctrl(SET_DC_POWER_ON);
+      }
+      
       if (ret == 0) {
-        power_on_post_actions();
+        ret = pal_check_server_power_change_correct(SET_DC_POWER_ON);
+      }
+      
+      if (ret == 0) {
+        pal_host_power_on_post_actions();
       }
       return ret;
 
@@ -501,12 +643,22 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       if (status == SERVER_POWER_OFF) {
         return POWER_STATUS_ALREADY_OK;
       }
-      if (power_off_pre_actions() < 0 ) {
+      if (pal_host_power_off_pre_actions() < 0 ) {
         return POWER_STATUS_ERR;
       }
-      ret = bic_server_power_ctrl(SET_GRACEFUL_POWER_OFF);
+      
+      if (is_ctrl_via_bic == true) {
+        ret = bic_server_power_ctrl(SET_GRACEFUL_POWER_OFF);
+      } else {
+        ret = pal_server_power_ctrl(SET_GRACEFUL_POWER_OFF);
+      }
+      
       if (ret == 0) {
-        power_off_post_actions();
+        ret = pal_check_server_power_change_correct(SET_GRACEFUL_POWER_OFF);
+      }
+      
+      if (ret == 0) {
+        pal_host_power_off_post_actions();
       }
       return ret;
 
@@ -517,18 +669,27 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       return bic_server_power_ctrl(SET_HOST_RESET);
 
     case SERVER_12V_ON:
-      if (status == SERVER_12V_ON) {
+      if (status != SERVER_12V_OFF) {
         return POWER_STATUS_ALREADY_OK;
       }
-      return server_power_12v_on();
+      
+      ret = server_power_12v_on();
+      if (ret == 0) {
+        power_12v_on_post_actions();
+      }
+      
+      return ret;
 
     case SERVER_12V_OFF:
       if (status == SERVER_12V_OFF) {
         return POWER_STATUS_ALREADY_OK;
       }
+      if (pal_host_power_off_pre_actions() < 0 ) {
+        return POWER_STATUS_ERR;
+      }
       ret = server_power_12v_off();
       if (ret == 0) {
-        power_off_post_actions();
+        pal_host_power_off_post_actions();
       }
       return ret;
 
@@ -536,12 +697,17 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       if (status == SERVER_12V_OFF) {
         return server_power_12v_on();
       } else {
+        if (pal_host_power_off_pre_actions() < 0 ) {
+          return POWER_STATUS_ERR;
+        }
         if (server_power_12v_off() < 0) {
           return POWER_STATUS_ERR;
         }
         sleep(SERVER_AC_CYCLE_DELAY);
         if (server_power_12v_on() < 0) {
           return POWER_STATUS_ERR;
+        } else {
+          power_12v_on_post_actions();
         }
       }
       break;
@@ -603,4 +769,223 @@ pal_get_last_pwr_state(uint8_t fru, char *state) {
   }
 
   return ret;
+}
+
+int
+pal_server_power_ctrl(uint8_t action) {
+  uint8_t pwr_seq[PWR_CTRL_ACT_CNT] = {SERVER_POWER_BTN_HIGH, SERVER_POWER_BTN_LOW, SERVER_POWER_BTN_HIGH};
+  int ret = 0, i = 0;
+  
+  if ( (action != SET_DC_POWER_OFF) && (action != SET_DC_POWER_ON) && (action != SET_GRACEFUL_POWER_OFF)) {
+    syslog(LOG_ERR, "%s() invalid action\n", __func__);
+    return -1;
+  }
+  
+  for (i = 0; i < PWR_CTRL_ACT_CNT; i++) {
+    ret = pal_set_pwr_btn(pwr_seq[i]);
+    if (pwr_seq[i] == SERVER_POWER_BTN_LOW) {
+      switch (action) {
+        case SET_DC_POWER_OFF:
+          sleep(DELAY_DC_POWER_OFF);
+          break;
+        case SET_DC_POWER_ON:
+          sleep(DELAY_DC_POWER_ON);
+          break;
+        case SET_GRACEFUL_POWER_OFF:
+          sleep(DELAY_GRACEFUL_SHUTDOWN);
+          break;
+        default:
+          return -1;
+      }
+    }
+  }
+  
+  return ret;
+}
+
+int
+pal_set_pwr_btn(uint8_t val) {
+  int i2cfd = 0, ret = 0;
+  i2c_master_rw_command command;
+  
+  i2cfd = i2c_cdev_slave_open(I2C_BS_FPGA_BUS, BS_FPGA_SLAVE_ADDR >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if (i2cfd < 0) {
+    syslog(LOG_ERR, "Fail to control server power because I2C BUS: %d open failed", I2C_BS_FPGA_BUS);
+    return i2cfd;
+  }
+  
+  memset(&command, 0, sizeof(command));
+  command.offset = BS_FPGA_SERVER_POWER_CTRL;
+  command.val = val;
+  
+  ret = i2c_rdwr_msg_transfer(i2cfd, BS_FPGA_SLAVE_ADDR, (uint8_t *)&command, sizeof(command), NULL, 0);
+  close(i2cfd);
+  return ret;
+}
+
+int
+pal_server_power_cycle() {
+  int ret = 0;
+
+  ret = pal_server_power_ctrl(SET_DC_POWER_OFF);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s() Cannot set power state to off\n", __func__);
+    return ret;
+  }
+
+  sleep(DELAY_DC_POWER_CYCLE);
+
+  ret = pal_server_power_ctrl(SET_DC_POWER_ON);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s() Cannot set power state to on\n", __func__);
+  }
+
+  return ret;
+}
+
+int
+pal_get_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t *status, uint8_t *type) {
+  gpio_value_t val = 0;
+  int ret = 0;
+  uint8_t chassis_type = 0;
+  
+  if ((status == NULL) || (type == NULL)) {
+    syslog(LOG_WARNING, "%s(): Failed to get device power due to parameter is NULL", __func__);
+    return POWER_STATUS_ERR;
+  }
+  
+  ret = fbgc_common_get_chassis_type(&chassis_type);
+  if ((ret < 0) || (chassis_type != CHASSIS_TYPE5)) {
+    syslog(LOG_WARNING, "%s(): Only Type5 support E1S", __func__);
+    return POWER_STATUS_ERR;
+  }
+  
+  if (pal_get_server_12v_power(slot_id, status) < 0) {
+    return POWER_STATUS_ERR;
+  }
+  
+  if ((*status) == SERVER_12V_OFF) {
+    *status = DEVICE_POWER_OFF;
+    syslog(LOG_WARNING, "%s(): device power is off due to server is 12V-off", __func__);
+    return 0;
+  }
+  
+  if (dev_id == DEV_ID0_E1S) {
+    val = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_E1S_1_3V3EFUSE_PGOOD));
+  } else if (dev_id == DEV_ID1_E1S) {
+    val = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_E1S_2_3V3EFUSE_PGOOD));
+  } else {
+    syslog(LOG_WARNING, "%s(): wrong device id: %d", __func__, dev_id);
+    return POWER_STATUS_ERR;
+  }
+  
+  *status = val;
+  
+  return 0;
+}
+
+int
+pal_set_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t cmd) {
+  uint8_t e1s_pwr_status = 0, type = 0;
+  int ret = 0;
+  uint8_t chassis_type = 0, server_power_status = 0;
+  
+  ret = fbgc_common_get_chassis_type(&chassis_type);
+  if ((ret < 0) || (chassis_type != CHASSIS_TYPE5)) {
+    syslog(LOG_WARNING, "%s(): Only Type5 support control E1.S power", __func__);
+    return -1;
+  }
+  
+  ret = pal_get_server_12v_power(slot_id, &server_power_status);
+  if ((ret < 0) || (server_power_status == SERVER_12V_OFF)) {
+    syslog(LOG_WARNING, "%s(): Failed to control E1.S power due to server is 12V-off", __func__);
+    return POWER_STATUS_ERR;
+  }
+  
+  if (pal_get_device_power(slot_id, dev_id, &e1s_pwr_status, &type) < 0) {
+    return -1;
+  }
+  
+  switch(cmd) {
+    case SERVER_POWER_ON:
+      if (e1s_pwr_status == DEVICE_POWER_ON) {
+        return POWER_STATUS_ALREADY_OK;
+      }
+      ret = pal_set_dev_power_status(dev_id, DEVICE_POWER_ON);
+      break;
+    case SERVER_POWER_OFF:
+      if (e1s_pwr_status == DEVICE_POWER_OFF) {
+        return POWER_STATUS_ALREADY_OK;
+      }
+      ret = pal_set_dev_power_status(dev_id, DEVICE_POWER_OFF);
+      break;
+    default:
+      ret = -1;
+  }
+  
+  return ret;
+}
+
+int
+pal_set_dev_power_status(uint8_t dev_id, uint8_t cmd) {
+  int i2cfd, ret = 0;
+  i2c_master_rw_command command;
+  
+  memset(&command, 0, sizeof(command));
+  
+  if (dev_id == DEV_ID0_E1S) {
+    command.offset = BS_FPGA_E1S0_POWER_CTRL;
+  } else if (dev_id == DEV_ID1_E1S) {
+    command.offset = BS_FPGA_E1S1_POWER_CTRL;
+  } else {
+    syslog(LOG_ERR, "Fail to control E1.S power due to wrong device id: %d", dev_id);
+    return -1;
+  }
+  
+  if (cmd == DEVICE_POWER_ON) {
+    command.val = E1S_POWER_ADD;
+  } else if (cmd == DEVICE_POWER_OFF){
+    command.val = E1S_POWER_REMOVE;
+  } else {
+    syslog(LOG_ERR, "Fail to control E1.S power due to wrong action: %d", cmd);
+    return -1;
+  }
+  
+  i2cfd = i2c_cdev_slave_open(I2C_BS_FPGA_BUS, BS_FPGA_SLAVE_ADDR >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if (i2cfd < 0) {
+    syslog(LOG_ERR, "Fail to control E1.S power due to I2C BUS: %d open failed", I2C_BS_FPGA_BUS);
+    return i2cfd;
+  }
+    
+  ret = i2c_rdwr_msg_transfer(i2cfd, BS_FPGA_SLAVE_ADDR, (uint8_t *)&command, sizeof(command), NULL, 0);
+  close(i2cfd);
+  return ret;
+}
+
+int
+pal_check_server_power_change_correct(uint8_t action) {
+  int times = 0, ret = 0;
+  uint8_t status = 0;
+  
+  while (times < WAIT_POWER_STATUS_CHANGE_TIME) {
+    ret = pal_get_server_power(FRU_SERVER, &status);
+    
+    if (ret == 0) {
+      if ((action == SET_DC_POWER_ON) && (status == STAT_DC_ON)) {
+        return ret;
+      } else if ((action == SET_DC_POWER_OFF) && (status == STAT_DC_OFF)) {
+        return ret;
+      } else if ((action == SET_GRACEFUL_POWER_OFF) && (status == STAT_DC_OFF)) {
+        return ret;
+      }
+    }
+    
+    times++;
+    sleep(1);
+  }
+
+  syslog(LOG_ERR, "%s(): power state doesn't change correctly.\n", __func__);
+
+  return -1;
+
 }

@@ -60,6 +60,7 @@ const static speed_t BAUDRATE_VALUES[] = {
 
 #define REGISTER_PSU_STATUS 0x68
 #define REGISTER_PSU_BAUDRATE 0xA3
+#define REGISTER_PSU_TIMESTAMP 0x12A
 
 // This list overlaps with Modbus constants in modbus.h; ensure there are no duplicates
 #define READ_ERROR_RESPONSE -2
@@ -69,10 +70,18 @@ const static speed_t BAUDRATE_VALUES[] = {
 // baudrate-changing commands need a higher timeout (half a second)
 #define BAUDRATE_CMD_TIMEOUT 500000
 
+// timeout can take up to 100ms to set
+#define TIMESTAMP_CMD_TIMEOUT  100000
+
 /*
  * Check for new PSUs every "PSU_SCAN_INTERVAL" seconds.
  */
 #define PSU_SCAN_INTERVAL 120
+
+/*
+ * Write timestamp every 1 hour
+ */
+#define PSU_TIMESTAMP_UPDATE_INTERVAL (3600)
 
 /*
  * A small amount of delay (in seconds) during PSU access, mainly for
@@ -130,6 +139,7 @@ static struct {
   monitoring_config *config;
 
   uint8_t num_active_addrs;
+  bool first_scan_done[MAX_RACKS][MAX_SHELVES][MAX_PSUS];
   bool ignored_psus[MAX_RACKS][MAX_SHELVES][MAX_PSUS];
   uint8_t active_addrs[MAX_ACTIVE_ADDRS];
   psu_datastore_t* stored_data[MAX_ACTIVE_ADDRS];
@@ -389,6 +399,45 @@ static void update_psu_comms(psu_datastore_t *psu, bool success) {
   }
 }
 
+/*
+ * Note: Some platform like Wedge400 has a lot of modbus timeout errors and
+ * sometimes BMC can not detect one of the Rack PSUs. This method allows
+ * us to conditionally set the number of retries based on whether the
+ * PSU is previously known and/or is it the first time we are trying to
+ * detect a PSU.
+ */
+static int psu_retry_limit(psu_datastore_t *info, int addr)
+{
+  int rack, shelf, psu;
+
+  /* If we are communicating with a previously known PSU,
+   * then go ahead and retry MAX_RETRY times on failure */
+  if (info) {
+    return MAX_RETRY;
+  }
+
+  /* Do not waste time retrying on invalid PSU addresses */
+  if (!psu_location(addr, &rack, &shelf, &psu)) {
+    return 1;
+  }
+
+  /* Do not waste time retrying commands to PSU addresses
+   * which are most probably never going to exist. This
+   * flag being set means we already have retried detecting
+   * this PSU in the past  */
+  if (rackmond_config.first_scan_done[rack][shelf][psu]) {
+    return 1;
+  }
+
+  /* This is an unknown PSU but also the first time we are
+   * trying to communicate with this address. Retry to prevent
+   * missing detection of a PSU. Set the flag so that the
+   * next scan we do not waste time retrying on this address.
+   */
+  rackmond_config.first_scan_done[rack][shelf][psu] = true;
+  return MAX_RETRY;
+}
+
 static int modbus_command(rs485_dev_t* dev, int timeout, char* cmd_buf,
                           size_t cmd_size, char* resp_buf, size_t resp_size,
                           size_t exp_resp_len, speed_t baudrate, const char *caller) {
@@ -396,6 +445,7 @@ static int modbus_command(rs485_dev_t* dev, int timeout, char* cmd_buf,
   int error = 0;
   useconds_t delay = rackmond_config.min_delay;
   psu_datastore_t* psu = NULL;
+  int max_retry;
 
   int slot = lookup_data_slot(cmd_buf[0]);
   if (slot >= 0) {
@@ -415,20 +465,14 @@ static int modbus_command(rs485_dev_t* dev, int timeout, char* cmd_buf,
   req.expected_len = (exp_resp_len != 0 ? exp_resp_len : resp_size);
   req.scan = scanning;
 
+
   if (dev_lock(dev) != 0) {
     return -1;
   }
 
-  /*
-   * Note: Some platform like Wedge400 has a lot of modbus timeout errors and
-   * sometimes BMC can not detect one of the Rack PSUs.
-   * We tried fix this issue with HW change to add external crystal, but this
-   * need to update FTDI eeprom to enable the external crystal. However, FTDI
-   * can not boot up if update FTDI chip eeprom fail, after communicate with
-   * vendor and FB, finally we choose software retry to fix the issue as a
-   * workaround solution.
-   */
-  for (int retry = 0; retry < MAX_RETRY; retry++) {
+  max_retry = psu_retry_limit(psu, (int)cmd_buf[0]);
+
+  for (int retry = 0; retry < max_retry; retry++) {
     CHECK_LATENCY_START();
     error = modbuscmd(&req, baudrate, caller);
     CHECK_LATENCY_END(
@@ -547,71 +591,146 @@ cleanup:
 /*
  * Write Holding Register (Function 6) Request Header Size:
  *   Slave_Addr (1-byte) + Function (1-byte) + Starting_Reg_Addr (2-bytes) +
- *   Reg_Value_Arry (2 * Reg_Count).
+ *   Reg_Value (2-bytes).
  */
-#define MODBUS_FUN6_REQ_HDR_SIZE(nreg)  (2 * (nreg) + 4)
+#define MODBUS_FUN6_REQ_HDR_SIZE  (6)
 
 /*
  * Write Holding Register (Function 6) Response packet size:
  *   Same as request header size, plus CRC (2-bytes).
  */
-#define MODBUS_FUN6_RESP_PKT_SIZE(nreg) (2 * (nreg) + 6)
+#define MODBUS_FUN6_RESP_PKT_SIZE (8)
 
 static int write_holding_reg(rs485_dev_t *dev, int timeout, uint8_t slave_addr,
-                             uint16_t reg_start_addr, uint16_t reg_count,
-                             uint16_t *reg_values, uint16_t *out, speed_t baudrate) {
-  int error = 0;
-  int dest_len, i;
-  size_t cmd_len = MODBUS_FUN6_REQ_HDR_SIZE(reg_count);
-  char command[cmd_len];
-  size_t resp_len = MODBUS_FUN6_RESP_PKT_SIZE(reg_count);
-  char *resp_buf;
-
-  resp_buf = malloc(resp_len);
-  if (resp_buf == NULL) {
-    OBMC_WARN("failed to allocate response buffer");
-    return -1;
-  }
+                             uint16_t reg_start_addr, uint16_t reg_value,
+                             uint16_t *written_reg_value, speed_t baudrate) {
+  int dest_len;
+  char command[MODBUS_FUN6_REQ_HDR_SIZE];
+  char resp_buf[MODBUS_FUN6_RESP_PKT_SIZE];
 
   command[0] = slave_addr;
-  command[1] = MODBUS_WRITE_HOLDING_REGISTERS;
+  command[1] = MODBUS_WRITE_HOLDING_REGISTER_SINGLE;
   command[2] = reg_start_addr >> 8;
   command[3] = reg_start_addr & 0xFF;
-
-  for (i = 0; i < reg_count; i++) {
-    command[i * 2 + 4] = reg_values[i] >> 8;
-    command[i * 2 + 5] = reg_values[i] & 0xFF;
-  }
+  command[4] = reg_value >> 8;
+  command[5] = reg_value & 0xFF;
 
   CHECK_LATENCY_START();
-  dest_len = modbus_command(dev, timeout, command, cmd_len, resp_buf, resp_len,
-                            0, baudrate, "write_holding_reg");
+  dest_len = modbus_command(dev, timeout, command, MODBUS_FUN6_REQ_HDR_SIZE,
+                            resp_buf, MODBUS_FUN6_RESP_PKT_SIZE, 0,
+                            baudrate, "write_holding_reg");
   CHECK_LATENCY_END("rackmond::write_holding_reg::modbus_command cmd_len=%lu, resp_len=%lu status=%d",
-      (unsigned long)MODBUS_FUN3_REQ_HDR_SIZE, (unsigned long)resp_len, dest_len);
-  ERR_EXIT(dest_len);
-
-  if (dest_len >= 4) {
-    memcpy(out, resp_buf + 2, reg_count * 2 + 2);
-  } else {
+      (unsigned long)MODBUS_FUN6_REQ_HDR_SIZE, (unsigned long)MODBUS_FUN6_RESP_PKT_SIZE, dest_len);
+  if (dest_len < 0) {
+    OBMC_WARN("modbuscmd for addr 0x%02x returned %d\n", slave_addr, dest_len);
+    return dest_len;
+  }
+  if (dest_len < 4) {
     OBMC_WARN("Unexpected short but CRC correct response!\n");
-    error = -1;
-    goto cleanup;
+    return -1;
   }
   if (resp_buf[0] != slave_addr) {
     OBMC_WARN("Got response from addr %02x when expected %02x\n",
               resp_buf[0], slave_addr);
-    error = -1;
-    goto cleanup;
+    return -1;
   }
-  if (resp_buf[1] != MODBUS_WRITE_HOLDING_REGISTERS) {
+  if (resp_buf[1] != MODBUS_WRITE_HOLDING_REGISTER_SINGLE) {
     // got an error response instead of a write registers response
-    error = WRITE_ERROR_RESPONSE;
-    goto cleanup;
+    OBMC_WARN("Unexpected function %d when expected %d\n",
+        (int)resp_buf[1], (int)MODBUS_WRITE_HOLDING_REGISTER_SINGLE);
+    return WRITE_ERROR_RESPONSE;
+  }
+  if (written_reg_value) {
+    *written_reg_value = (uint16_t)resp_buf[4] << 8 | resp_buf[5];
+  }
+  return 0;
+}
+
+/*
+ * Write Holding Register multiple (Function 16) Request Header Size:
+ *   Slave_Addr (1-byte) + Function (1-byte) + Starting_Reg_Addr (2-bytes) +
+ *   Reg_Count (2-bytes) + Bytes (1-bytes) +
+ *   Reg_Value_Arr (Reg_Count * 2 bytes),
+ */
+#define MODBUS_FUN16_REQ_HDR_SIZE(regs)  (7 + (2 * (regs)))
+
+/*
+ * Write Holding Register multiple (Function 16) Response packet size:
+ *   Slave_Addr (1-byte) + Function (1-byte) + Starting_Reg_Addr (2-bytes) +
+ *   Reg_Count (2-bytes) + CRC (2-bytes)
+ */
+#define MODBUS_FUN16_RESP_PKT_SIZE (8)
+
+int write_holding_regs(rs485_dev_t *dev, int timeout, uint8_t slave_addr,
+                             uint16_t reg_start_addr, uint16_t reg_count,
+                             uint16_t *reg_value, speed_t baudrate) {
+  int dest_len, i;
+  size_t cmd_len = MODBUS_FUN16_REQ_HDR_SIZE(reg_count);
+  char command[cmd_len];
+  char resp_buf[MODBUS_FUN16_RESP_PKT_SIZE];
+  uint16_t written_reg;
+
+  command[0] = slave_addr;
+  command[1] = MODBUS_WRITE_HOLDING_REGISTER_MULTIPLE;
+  command[2] = reg_start_addr >> 8;
+  command[3] = reg_start_addr & 0xFF;
+  command[4] = reg_count >> 8;
+  command[5] = reg_count & 0xFF;
+  command[6] = reg_count * 2;
+  for (i = 0; i < reg_count; i++) {
+    command[7 + (i * 2)] = reg_value[i] >> 8;
+    command[8 + (i * 2)] = reg_value[i] & 0xFF;
   }
 
-cleanup:
-  free(resp_buf);
-  return error;
+  CHECK_LATENCY_START();
+  dest_len = modbus_command(dev, timeout, command, cmd_len,
+                            resp_buf, MODBUS_FUN16_RESP_PKT_SIZE, 0,
+                            baudrate, "write_holding_regs");
+  CHECK_LATENCY_END("rackmond::write_holding_regs::modbus_command cmd_len=%lu, resp_len=%lu status=%d",
+      (unsigned long)cmd_len, (unsigned long)MODBUS_FUN16_RESP_PKT_SIZE, dest_len);
+  if (dest_len < 0) {
+    OBMC_WARN("modbuscmd for addr 0x%02x returned %d\n", slave_addr, dest_len);
+    return dest_len;
+  }
+  if (dest_len < 4) {
+    OBMC_WARN("Unexpected short but CRC correct response!\n");
+    return -1;
+  }
+  if (resp_buf[0] != slave_addr) {
+    OBMC_WARN("Got response from addr %02x when expected %02x\n",
+              resp_buf[0], slave_addr);
+    return -1;
+  }
+  if (resp_buf[1] != MODBUS_WRITE_HOLDING_REGISTER_MULTIPLE) {
+    // got an error response instead of a write registers response
+    OBMC_WARN("Unexpected function %d when expected %d\n",
+        (int)resp_buf[1], (int)MODBUS_WRITE_HOLDING_REGISTER_SINGLE);
+    return WRITE_ERROR_RESPONSE;
+  }
+  written_reg = (uint16_t)resp_buf[4] << 8 | resp_buf[5];
+  if (written_reg != reg_count) {
+    OBMC_WARN("Unexpected number of registers written. Expected: %d Actual: %d\n",
+        reg_count, written_reg);
+    return WRITE_ERROR_RESPONSE;
+  }
+  return 0;
+}
+
+int set_psu_timestamp(psu_datastore_t *psu, uint32_t unixtime)
+{
+  uint16_t values[2];
+
+  if (psu == NULL) {
+    return -1;
+  }
+  if (unixtime == 0) {
+    unixtime = time(NULL);
+  }
+  OBMC_INFO("Writing timestamp 0x%08x to PSU: 0x%02x", unixtime, psu->addr);
+  values[0] = unixtime >> 16;
+  values[1] = unixtime & 0xFFFF;
+  return write_holding_regs(&rackmond_config.rs485, TIMESTAMP_CMD_TIMEOUT,
+      psu->addr, REGISTER_PSU_TIMESTAMP, 2, values, psu->baudrate);
 }
 
 static int sub_uint8s(const void* a, const void* b) {
@@ -626,8 +745,8 @@ static int sub_uint8s(const void* a, const void* b) {
 static int check_psu_baudrate(psu_datastore_t *psu, speed_t *baudrate_out) {
   int pos, err;
   bool supported = true;
-  uint16_t output[2];
-  uint16_t values[1];
+  uint16_t value;
+  uint16_t written_value;
   psu_datastore_t *mdata;
 
   if (psu == NULL) {
@@ -659,16 +778,16 @@ static int check_psu_baudrate(psu_datastore_t *psu, speed_t *baudrate_out) {
   }
 
   // now attempt to raise the baudrate for this PSU
-  values[0] = baudrate_to_value(rackmond_config.desired_baudrate);
+  value = baudrate_to_value(rackmond_config.desired_baudrate);
   err = write_holding_reg(&rackmond_config.rs485, BAUDRATE_CMD_TIMEOUT,
-                          psu->addr, REGISTER_PSU_BAUDRATE, 1, values, output,
-                          psu->baudrate);
+                          psu->addr, REGISTER_PSU_BAUDRATE, value,
+                          &written_value, psu->baudrate);
 
   // if unsuccessful, assume that the unit's baudrate didn't change
   if (err != 0) {
     OBMC_WARN("Could not set PSU at addr %02x to desired baudrate", psu->addr);
   } else {
-    pos = output[1] >> 8;
+    pos = written_value;
     psu->baudrate = BAUDRATE_VALUES[pos];
   }
 
@@ -979,8 +1098,7 @@ static void trigger_graceful_exit(int sig) {
 
 static int reset_psu_baudrate(void) {
   int pos, ret = 0, err;
-  uint16_t output[2];
-  uint16_t values[1];
+  uint16_t value;
   psu_datastore_t *mdata;
 
   global_lock();
@@ -999,11 +1117,11 @@ static int reset_psu_baudrate(void) {
       continue;
     }
     if (mdata->baudrate != DEFAULT_BAUDRATE) {
-      values[0] = baudrate_to_value(DEFAULT_BAUDRATE);
+      value = baudrate_to_value(DEFAULT_BAUDRATE);
       err = write_holding_reg(&rackmond_config.rs485,
                               BAUDRATE_CMD_TIMEOUT, mdata->addr,
-                              REGISTER_PSU_BAUDRATE, 1, values, output,
-                              mdata->baudrate);
+                              REGISTER_PSU_BAUDRATE, value,
+                              NULL, mdata->baudrate);
 
       if (err != 0) {
         OBMC_WARN("Unable to reset PSU %02x to the original baudrate",
@@ -1138,12 +1256,41 @@ static int fetch_monitored_data(void) {
   return 0;
 }
 
+static int update_all_psu_timestamp(void)
+{
+  int pos;
+  psu_datastore_t *mdata;
+  int rc = 0;
+
+  if (global_lock() != 0) {
+    return -1;
+  }
+  if (rackmond_config.paused == 1 ||
+      rackmond_config.config == NULL) {
+    global_unlock();
+    return -1;
+  }
+  global_unlock();
+
+  for (pos = 0; pos < ARRAY_SIZE(rackmond_config.stored_data); pos++) {
+    if (should_exit)
+      break;
+    mdata = rackmond_config.stored_data[pos];
+    if (mdata != NULL) {
+      rc |= set_psu_timestamp(mdata, 0);
+    }
+  }
+  return rc;
+}
+
 static time_t search_at = 0;
 
 void* monitoring_loop(void* arg)
 {
   int ret;
   sigset_t sig_mask;
+  time_t timestamp_at = 0;
+  int last_num_psus = 0, num_psus = 0;
 
   /*
    * Block SIGINT and SIGTERM so these signals can be delivered to the
@@ -1166,7 +1313,6 @@ void* monitoring_loop(void* arg)
 
   while (!should_exit) {
     long delay;
-    int num_psus;
     struct timespec now;
 
     clock_gettime(CLOCK_REALTIME, &now);
@@ -1184,12 +1330,19 @@ void* monitoring_loop(void* arg)
       }
     }
 
+    if (last_num_psus != num_psus || timestamp_at <= now.tv_sec) {
+      OBMC_INFO("Updating timestamp\n");
+      update_all_psu_timestamp();
+      timestamp_at = now.tv_sec + PSU_TIMESTAMP_UPDATE_INTERVAL;
+    }
+
     /*
      * TODO: ideally we should allow the main thread to wake up this
      * monitoring loop (for example, in case "force_rescan" command is
      * received).
      */
     delay = search_at - now.tv_sec;
+    last_num_psus = num_psus;
     if (delay > PSU_ACCESS_NICE_DELAY)
       delay = PSU_ACCESS_NICE_DELAY;
     sleep(delay);

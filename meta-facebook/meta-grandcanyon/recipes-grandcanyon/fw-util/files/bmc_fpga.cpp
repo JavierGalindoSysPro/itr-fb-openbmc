@@ -12,6 +12,8 @@
 #include <syslog.h>
 #include <openbmc/obmc-i2c.h>
 #include <facebook/bic.h>
+#include <openbmc/pal.h>
+#include <facebook/fbgc_common.h>
 #include "bmc_fpga.h"
 
 using namespace std;
@@ -37,12 +39,26 @@ bool BmcFpgaComponent::is_valid_image(string image, bool force) {
   }
 
   size = fpgaFile.tellg();
-  if (size != MAX10_RPD_SIZE + 1) {
+  if (size != (MAX10_RPD_SIZE + IDENTIFY_OFFSET + 1)) {
     cout << "Invalid image size: " << size << endl;
+    cout << "If you are updating with old version firmware, please use force update."  <<endl;
     goto end;
   }
 
-  fpgaFile.seekg(MAX10_RPD_SIZE, ios::beg);
+  // Compare MD5 of image
+  if (check_image_md5(image.c_str(), MAX10_RPD_SIZE, (MAX10_RPD_SIZE + MD5_OFFSET)) < 0) {
+    cout << "Image file has corrupted"<< endl;
+    goto end;
+  }
+
+  // Compare signature of image
+  if (check_image_signature(image.c_str(), (MAX10_RPD_SIZE + SIGNATURE_OFFSET)) < 0) {
+    cout << "The image is not for Grand Canyon"<< endl;
+    goto end;
+  }
+
+  // Check ID of image
+  fpgaFile.seekg((MAX10_RPD_SIZE + IDENTIFY_OFFSET), ios::beg);
   fpgaFile.read(read_buffer, sizeof(read_buffer));
 
   if (fpgaFile.gcount() != sizeof(read_buffer)) {
@@ -66,31 +82,9 @@ end:
 
 int BmcFpgaComponent::get_ver_str(string& s) {
   int ret = 0;
-  char ver[32] = {0};
-  uint32_t ver_reg = ON_CHIP_FLASH_USER_VER;
-  uint8_t tbuf[4] = {0x00};
-  uint8_t rbuf[4] = {0x00};
-  uint8_t tlen = 4;
-  uint8_t rlen = 4;
-  int i2cfd = 0;
-
-  memcpy(tbuf, (uint8_t *)&ver_reg, tlen);
-  reverse(tbuf, tbuf + 4);
-
-  if ((i2cfd = i2c_cdev_slave_open(bus, addr >> 1, I2C_SLAVE_FORCE_CLAIM)) < 0) {
-    cout << "Failed to open i2c bus: " << bus << endl;
-    return -1;
-  }
-
-  if (ioctl(i2cfd, I2C_SLAVE, addr) < 0) {
-    cout << "Failed to talk to slave@0x" << hex << addr << endl;
-    ret = -1;
-  } else {
-    ret = i2c_rdwr_msg_transfer(i2cfd, addr << 1, tbuf, tlen, rbuf, rlen);
-    snprintf(ver, sizeof(ver), "%02X%02X%02X%02X", rbuf[3], rbuf[2], rbuf[1], rbuf[0]);
-  }
-
-  close(i2cfd);
+  char ver[MAX_VALUE_LEN] = {0};
+  
+  ret = pal_get_fpga_ver_cache(bus, addr, ver);
   s = string(ver);
 
   return ret;
@@ -166,25 +160,28 @@ end:
   return ret;
 }
 
-int BmcFpgaComponent::update_fpga(string image)
+int BmcFpgaComponent::update_fpga(string image, string update_image)
 {
   int ret = 0;
   char key[32] = {0};
+  string fru_name = fru();
 
-  syslog(LOG_CRIT, "Updating UIC FPGA. File: %s", image.c_str());
+  transform(fru_name.begin(), fru_name.end(), fru_name.begin(), ::toupper);
+
+  syslog(LOG_CRIT, "Updating %s FPGA. File: %s", fru_name.c_str(), image.c_str());
   if (cpld_intf_open(pld_type, INTF_I2C, &attr) != 0) {
     cout << "Cannot open i2c!" << endl;
     ret = FW_STATUS_FAILURE;
   } else {
-    ret = cpld_program((char *)image.c_str(), key, false);
+    ret = cpld_program((char *)update_image.c_str(), key, false);
     cpld_intf_close(INTF_I2C);
     if ( ret < 0 ) {
       cout << "Error Occur at updating FPGA FW!" << endl;
     }
   }
 
-  syslog(LOG_CRIT, "Updated UIC FPGA. File: %s. Result: %s", image.c_str(), (ret < 0) ? "Fail" : "Success");
-  remove(image.c_str());
+  syslog(LOG_CRIT, "Updated %s FPGA. File: %s. Result: %s", fru_name.c_str(), image.c_str(), (ret < 0) ? "Fail" : "Success");
+  remove(update_image.c_str());
 
   return ret;
 }
@@ -201,7 +198,7 @@ int BmcFpgaComponent::update_wrapper(string image, bool force)
     return FW_STATUS_FAILURE;
   }
 
-  return update_fpga(update_image);
+  return update_fpga(image, update_image);
 }
 
 int BmcFpgaComponent::update(string image)

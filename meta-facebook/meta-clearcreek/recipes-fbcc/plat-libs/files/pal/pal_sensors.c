@@ -63,38 +63,6 @@ static float vr_avd_volt[vr_NUM];
 static float vr_avd_curr[vr_NUM];
 
 const uint8_t mb_sensor_list[] = {
-  MB_NIC_0_TEMP,
-  MB_NIC_0_VOLT,
-  MB_NIC_0_CURR,
-  MB_NIC_0_POWER,
-  MB_NIC_1_TEMP,
-  MB_NIC_1_VOLT,
-  MB_NIC_1_CURR,
-  MB_NIC_1_POWER,
-  MB_NIC_2_TEMP,
-  MB_NIC_2_VOLT,
-  MB_NIC_2_CURR,
-  MB_NIC_2_POWER,
-  MB_NIC_3_TEMP,
-  MB_NIC_3_VOLT,
-  MB_NIC_3_CURR,
-  MB_NIC_3_POWER,
-  MB_NIC_4_TEMP,
-  MB_NIC_4_VOLT,
-  MB_NIC_4_CURR,
-  MB_NIC_4_POWER,
-  MB_NIC_5_TEMP,
-  MB_NIC_5_VOLT,
-  MB_NIC_5_CURR,
-  MB_NIC_5_POWER,
-  MB_NIC_6_TEMP,
-  MB_NIC_6_VOLT,
-  MB_NIC_6_CURR,
-  MB_NIC_6_POWER,
-  MB_NIC_7_TEMP,
-  MB_NIC_7_VOLT,
-  MB_NIC_7_CURR,
-  MB_NIC_7_POWER,
   MB_VR_P0V8_VDD0_TEMP,
   MB_VR_P0V8_VDD0_VOUT,
   MB_VR_P0V8_VDD0_CURR,
@@ -268,30 +236,6 @@ const uint8_t e1s_1_sensor_list[] = {
   BAY_0_6_NVME_CTEMP,
   BAY_0_7_NVME_CTEMP,
   BAY_0_NVME_CTEMP,
-  E1S_0_0_NVME_VOLT,
-  E1S_0_0_NVME_CURR,
-  E1S_0_0_NVME_PWR,
-  E1S_0_1_NVME_VOLT,
-  E1S_0_1_NVME_CURR,
-  E1S_0_1_NVME_PWR,
-  E1S_0_2_NVME_VOLT,
-  E1S_0_2_NVME_CURR,
-  E1S_0_2_NVME_PWR,
-  E1S_0_3_NVME_VOLT,
-  E1S_0_3_NVME_CURR,
-  E1S_0_3_NVME_PWR,
-  E1S_0_4_NVME_VOLT,
-  E1S_0_4_NVME_CURR,
-  E1S_0_4_NVME_PWR,
-  E1S_0_5_NVME_VOLT,
-  E1S_0_5_NVME_CURR,
-  E1S_0_5_NVME_PWR,
-  E1S_0_6_NVME_VOLT,
-  E1S_0_6_NVME_CURR,
-  E1S_0_6_NVME_PWR,
-  E1S_0_7_NVME_VOLT,
-  E1S_0_7_NVME_CURR,
-  E1S_0_7_NVME_PWR,
 };
 
 const uint8_t e1s_2_sensor_list[] = {
@@ -305,30 +249,62 @@ const uint8_t e1s_2_sensor_list[] = {
   BAY_1_6_NVME_CTEMP,
   BAY_1_7_NVME_CTEMP,
   BAY_1_NVME_CTEMP,
-  E1S_1_0_NVME_VOLT,
-  E1S_1_0_NVME_CURR,
-  E1S_1_0_NVME_PWR,
-  E1S_1_1_NVME_VOLT,
-  E1S_1_1_NVME_CURR,
-  E1S_1_1_NVME_PWR,
-  E1S_1_2_NVME_VOLT,
-  E1S_1_2_NVME_CURR,
-  E1S_1_2_NVME_PWR,
-  E1S_1_3_NVME_VOLT,
-  E1S_1_3_NVME_CURR,
-  E1S_1_3_NVME_PWR,
-  E1S_1_4_NVME_VOLT,
-  E1S_1_4_NVME_CURR,
-  E1S_1_4_NVME_PWR,
-  E1S_1_5_NVME_VOLT,
-  E1S_1_5_NVME_CURR,
-  E1S_1_5_NVME_PWR,
-  E1S_1_6_NVME_VOLT,
-  E1S_1_6_NVME_CURR,
-  E1S_1_6_NVME_PWR,
-  E1S_1_7_NVME_VOLT,
-  E1S_1_7_NVME_CURR,
-  E1S_1_7_NVME_PWR,
+};
+
+const uint8_t nic0_sensor_list[] = {
+  MB_NIC_0_TEMP,
+  MB_NIC_0_VOLT,
+  MB_NIC_0_CURR,
+  MB_NIC_0_POWER,
+};
+
+const uint8_t nic1_sensor_list[] = {
+  MB_NIC_1_TEMP,
+  MB_NIC_1_VOLT,
+  MB_NIC_1_CURR,
+  MB_NIC_1_POWER,
+};
+
+const uint8_t nic2_sensor_list[] = {
+  MB_NIC_2_TEMP,
+  MB_NIC_2_VOLT,
+  MB_NIC_2_CURR,
+  MB_NIC_2_POWER,
+};
+
+const uint8_t nic3_sensor_list[] = {
+  MB_NIC_3_TEMP,
+  MB_NIC_3_VOLT,
+  MB_NIC_3_CURR,
+  MB_NIC_3_POWER,
+};
+
+const uint8_t nic4_sensor_list[] = {
+  MB_NIC_4_TEMP,
+  MB_NIC_4_VOLT,
+  MB_NIC_4_CURR,
+  MB_NIC_4_POWER,
+};
+
+const uint8_t nic5_sensor_list[] = {
+  MB_NIC_5_TEMP,
+  MB_NIC_5_VOLT,
+  MB_NIC_5_CURR,
+  MB_NIC_5_POWER,
+};
+
+const uint8_t nic6_sensor_list[] = {
+  MB_NIC_6_TEMP,
+  MB_NIC_6_VOLT,
+  MB_NIC_6_CURR,
+  MB_NIC_6_POWER,
+};
+
+const uint8_t nic7_sensor_list[] = {
+  MB_NIC_7_TEMP,
+  MB_NIC_7_VOLT,
+  MB_NIC_7_CURR,
+  MB_NIC_7_POWER,
 };
 
 PAL_I2C_BUS_INFO nic_info_list[] = {
@@ -451,13 +427,13 @@ PAL_SENSOR_MAP sensor_map[] = {
   {"CC_PDB_HSC_VIN" , HSC_ID0, read_hsc_vin , true, {13.2, 0, 0, 10.8, 0, 0, 0, 0}, VOLT}, //0x51
   {"CC_PDB_HSC_IOUT", HSC_ID0, read_hsc_iout, true, {0, 0, 0, 0, 0, 0, 0, 0}, CURR}, //0x52
   {"CC_PDB_HSC_PIN" , HSC_ID0, read_hsc_pin , true, {0, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0x53
-  {"CC_BB_P12V_PUX" , ADC0, read_adc_value, true, {13.2, 0, 0, 10.8, 0, 0, 0, 0}    , VOLT}, //0x54
+  {"CC_BB_P12V_AUX" , ADC0, read_adc_value, true, {13.2, 0, 0, 10.8, 0, 0, 0, 0}    , VOLT}, //0x54
   {"CC_BB_P3V3_STBY", ADC1, read_adc_value, true, {3.47, 0, 0, 3.13, 0, 0, 0, 0}  , VOLT}, //0x55
   {"CC_BB_P5V_STBY" , ADC2, read_adc_value, true, {5.25, 0, 0, 4.75, 0, 0, 0, 0}    , VOLT}, //0x56
   {"CC_BB_P3V3"     , ADC3, read_adc_value, 0, {3.47, 0, 0, 3.13, 0, 0, 0, 0}  , VOLT}, //0x57
   {"CC_BB_P3V3_PAX" , ADC4, read_adc_value, 0, {3.47, 0, 0, 3.13, 0, 0, 0, 0}  , VOLT}, //0x58
   {"CC_BB_P3V_BAT"  , ADC5, read_bat_value, true, {3.4, 0, 0, 2.85, 0, 0, 0, 0}    , VOLT}, //0x59
-  {"CC_BB_P2V5_AUX" , ADC6, read_adc_value, true, {2.625, 0, 0, 2.375, 0, 0, 0, 0}  , VOLT}, //0x5A
+  {"CC_BB_P2V5_AUX" , ADC6, read_adc_value, true, {2.63, 0, 0, 2.37, 0, 0, 0, 0}  , VOLT}, //0x5A
   {"CC_BB_P1V2_AUX" , ADC7, read_adc_value, true, {1.26, 0, 0, 1.14, 0, 0, 0, 0}    , VOLT}, //0x5B
   {"CC_BB_P1V15_AUX", ADC8, read_adc_value, true, {1.21, 0, 0, 1.09, 0, 0, 0, 0}, VOLT}, //0x5C
   {"CC_PDB_HSC_VOUT", HSC_ID0, read_hsc_vout, true, {13.4, 0, 0, 11.4, 0, 0, 0, 0}, VOLT}, //0x5D
@@ -649,6 +625,14 @@ size_t m2_1_sensor_cnt = sizeof(m2_1_sensor_list)/sizeof(uint8_t);
 size_t m2_2_sensor_cnt = sizeof(m2_2_sensor_list)/sizeof(uint8_t);
 size_t e1s_1_sensor_cnt = sizeof(e1s_1_sensor_list)/sizeof(uint8_t);
 size_t e1s_2_sensor_cnt = sizeof(e1s_2_sensor_list)/sizeof(uint8_t);
+size_t nic0_sensor_cnt = sizeof(nic0_sensor_list)/sizeof(uint8_t);
+size_t nic1_sensor_cnt = sizeof(nic1_sensor_list)/sizeof(uint8_t);
+size_t nic2_sensor_cnt = sizeof(nic2_sensor_list)/sizeof(uint8_t);
+size_t nic3_sensor_cnt = sizeof(nic3_sensor_list)/sizeof(uint8_t);
+size_t nic4_sensor_cnt = sizeof(nic4_sensor_list)/sizeof(uint8_t);
+size_t nic5_sensor_cnt = sizeof(nic5_sensor_list)/sizeof(uint8_t);
+size_t nic6_sensor_cnt = sizeof(nic6_sensor_list)/sizeof(uint8_t);
+size_t nic7_sensor_cnt = sizeof(nic7_sensor_list)/sizeof(uint8_t);
 
 bool check_pwron_time(int time) {
   char str[MAX_VALUE_LEN] = {0};
@@ -689,6 +673,14 @@ int pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value)
     case FRU_PDB:
     case FRU_CARRIER1:
     case FRU_CARRIER2:
+    case FRU_NIC0:
+    case FRU_NIC1:
+    case FRU_NIC2:
+    case FRU_NIC3:
+    case FRU_NIC4:
+    case FRU_NIC5:
+    case FRU_NIC6:
+    case FRU_NIC7:
       server_off = pal_is_server_off();
       id = sensor_map[sensor_num].id;
       if (server_off) {
@@ -760,6 +752,10 @@ int pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value)
     sprintf(str, "%.2f",*((float*)value));
   }
 
+  if(ret == READING_SKIP) {
+    return ret;
+  }
+
   if(kv_set(key, str, 0, 0) < 0) {
     syslog(LOG_WARNING, "pal_sensor_read_raw: cache_set key = %s, str = %s failed.", key, str);
     return -1;
@@ -801,6 +797,14 @@ pal_get_sensor_name(uint8_t fru, uint8_t sensor_num, char *name) {
   case FRU_PDB:
   case FRU_CARRIER1:
   case FRU_CARRIER2:
+  case FRU_NIC0:
+  case FRU_NIC1:
+  case FRU_NIC2:
+  case FRU_NIC3:
+  case FRU_NIC4:
+  case FRU_NIC5:
+  case FRU_NIC6:
+  case FRU_NIC7:
     sprintf(name, "%s", sensor_map[sensor_num].snr_name);
     break;
   default:
@@ -817,6 +821,14 @@ pal_get_sensor_threshold(uint8_t fru, uint8_t sensor_num, uint8_t thresh, void *
   case FRU_PDB:
   case FRU_CARRIER1:
   case FRU_CARRIER2:
+  case FRU_NIC0:
+  case FRU_NIC1:
+  case FRU_NIC2:
+  case FRU_NIC3:
+  case FRU_NIC4:
+  case FRU_NIC5:
+  case FRU_NIC6:
+  case FRU_NIC7:
     switch(thresh) {
     case UCR_THRESH:
       *val = sensor_map[sensor_num].snr_thresh.ucr_thresh;
@@ -862,6 +874,14 @@ pal_get_sensor_units(uint8_t fru, uint8_t sensor_num, char *units) {
     case FRU_PDB:
     case FRU_CARRIER1:
     case FRU_CARRIER2:
+    case FRU_NIC0:
+    case FRU_NIC1:
+    case FRU_NIC2:
+    case FRU_NIC3:
+    case FRU_NIC4:
+    case FRU_NIC5:
+    case FRU_NIC6:
+    case FRU_NIC7:
       switch(scale) {
         case TEMP:
           sprintf(units, "C");
@@ -924,7 +944,7 @@ int pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt)
       if(!strcmp(value, "m.2")) {
           *sensor_list = (uint8_t *) m2_1_sensor_list;
           *cnt = m2_1_sensor_cnt;
-      } else if(!strcmp(value, "e1.s")) {
+      } else if( (!strcmp(value, "e1.s")) ||  (!strcmp(value, "e1.s_v2")) ) {
           *sensor_list = (uint8_t *) e1s_1_sensor_list;
           *cnt = e1s_1_sensor_cnt;
       }
@@ -933,7 +953,7 @@ int pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt)
       if(!strcmp(value, "m.2")) {
           *sensor_list = (uint8_t *) m2_2_sensor_list;
           *cnt = m2_2_sensor_cnt;
-      } else if(!strcmp(value, "e1.s")) {
+      } else if( (!strcmp(value, "e1.s")) ||  (!strcmp(value, "e1.s_v2")) ) {
           *sensor_list = (uint8_t *) e1s_2_sensor_list;
           *cnt = e1s_2_sensor_cnt;
       }
@@ -951,15 +971,36 @@ int pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt)
       }
       break;
     case FRU_NIC0:
+      *sensor_list = (uint8_t *) nic0_sensor_list;
+      *cnt = nic0_sensor_cnt;
+      break;
     case FRU_NIC1:
+      *sensor_list = (uint8_t *) nic1_sensor_list;
+      *cnt = nic1_sensor_cnt;
+      break;
     case FRU_NIC2:
+      *sensor_list = (uint8_t *) nic2_sensor_list;
+      *cnt = nic2_sensor_cnt;
+      break;
     case FRU_NIC3:
+      *sensor_list = (uint8_t *) nic3_sensor_list;
+      *cnt = nic3_sensor_cnt;
+      break;
     case FRU_NIC4:
+      *sensor_list = (uint8_t *) nic4_sensor_list;
+      *cnt = nic4_sensor_cnt;
+      break;
     case FRU_NIC5:
+      *sensor_list = (uint8_t *) nic5_sensor_list;
+      *cnt = nic5_sensor_cnt;
+      break;
     case FRU_NIC6:
+      *sensor_list = (uint8_t *) nic6_sensor_list;
+      *cnt = nic6_sensor_cnt;
+      break;
     case FRU_NIC7:
-        *sensor_list = NULL;
-        *cnt = 0;
+      *sensor_list = (uint8_t *) nic7_sensor_list;
+      *cnt = nic7_sensor_cnt;
       break;
     default:
       syslog(LOG_WARNING, "%s, get key fail", __FUNCTION__);
@@ -1534,9 +1575,9 @@ read_bay_temp(uint8_t bay_id, float *value) {
   return ret;
 }
 
+static float max_nvme_temp0 = -99, max_nvme_temp1 = -99;
 static int
 read_nvme_temp(uint8_t sensor_num, float *value) {
-  static float max_nvme_temp0 = -99, max_nvme_temp1 = -99;
   int ret = 0;
   int bus_id = 0, nvme_id = 0;
   int fd = 0;
@@ -1551,7 +1592,9 @@ read_nvme_temp(uint8_t sensor_num, float *value) {
         return READING_NA;
       } else {
         *value = max_nvme_temp0;
-        max_nvme_temp0 = -99;
+        if (pal_is_server_off()) {
+          max_nvme_temp1 = -99;
+        }
         return PAL_EOK;
       }
       break;
@@ -1560,7 +1603,9 @@ read_nvme_temp(uint8_t sensor_num, float *value) {
         return READING_NA;
       } else {
         *value = max_nvme_temp1;
-        max_nvme_temp1 = -99;
+        if (pal_is_server_off()) {
+          max_nvme_temp1 = -99;
+        }
         return PAL_EOK;
       }
       break;

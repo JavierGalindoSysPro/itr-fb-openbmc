@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <syslog.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <sys/file.h>
 #include <string.h>
@@ -17,21 +18,28 @@
 #include <facebook/bic.h>
 #include "pal.h"
 
+#define ADC128_E1S_PIN_CNT  6
+#define MAX_E1S_VOL_SNR_SKIP   2
+
 static int read_adc_val(uint8_t adc_id, float *value);
 static int read_temp(uint8_t id, float *value);
 static int read_nic_temp(uint8_t nic_id, float *value);
 static int read_e1s_temp(uint8_t e1s_id, float *value);
-static int read_adc128(uint8_t id, float *value);
+static int read_adc128_e1s(uint8_t id, float *value);
+static int read_adc128_iocm(uint8_t id, float *value);
+static int read_adc128_nic(uint8_t id, float *value);
 static int read_ads1015(uint8_t id, float *value);
 static int read_ioc_temp(uint8_t id, float *value);
 static bool is_e1s_iocm_i2c_enabled(uint8_t id);
 static int get_current_dir(const char *device, char *dir_name);
 static int set_e1s_sensor_name(char *sensor_name, char side);
 
+static void apply_inlet_correction(float *value);
+
 static bool is_dpb_sensor_cached = false;
 static bool is_scc_sensor_cached = false;
 
-static sensor_info_t g_sinfo[MAX_SENSOR_NUM] = {0};
+static sensor_info_t g_sinfo[MAX_SENSOR_NUM + 1] = {0};
 static bool is_sdr_init[FRU_CNT] = {false};
 
 //{SensorName, ID, FUNCTION, STBY_READ, {UCR, UNC, UNR, LCR, LNC, LNR, Pos, Neg}, unit}
@@ -62,77 +70,77 @@ PAL_SENSOR_MAP uic_sensor_map[] = {
 
 PAL_SENSOR_MAP dpb_sensor_map[] = {
   [HDD_SMART_TEMP_00] =
-  {"HDD_SMART_TEMP_00", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_00", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_01] =
-  {"HDD_SMART_TEMP_01", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_01", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_02] =
-  {"HDD_SMART_TEMP_02", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_02", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_03] =
-  {"HDD_SMART_TEMP_03", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_03", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_04] =
-  {"HDD_SMART_TEMP_04", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_04", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_05] =
-  {"HDD_SMART_TEMP_05", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_05", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_06] =
-  {"HDD_SMART_TEMP_06", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_06", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_07] =
-  {"HDD_SMART_TEMP_07", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_07", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_08] =
-  {"HDD_SMART_TEMP_08", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_08", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_09] =
-  {"HDD_SMART_TEMP_09", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_09", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_10] =
-  {"HDD_SMART_TEMP_10", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_10", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_11] =
-  {"HDD_SMART_TEMP_11", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_11", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_12] =
-  {"HDD_SMART_TEMP_12", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_12", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_13] =
-  {"HDD_SMART_TEMP_13", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_13", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_14] =
-  {"HDD_SMART_TEMP_14", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_14", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_15] =
-  {"HDD_SMART_TEMP_15", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_15", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_16] =
-  {"HDD_SMART_TEMP_16", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_16", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_17] =
-  {"HDD_SMART_TEMP_17", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_17", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_18] =
-  {"HDD_SMART_TEMP_18", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_18", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_19] =
-  {"HDD_SMART_TEMP_19", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_19", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_20] =
-  {"HDD_SMART_TEMP_20", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_20", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_21] =
-  {"HDD_SMART_TEMP_21", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_21", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_22] =
-  {"HDD_SMART_TEMP_22", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_22", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_23] =
-  {"HDD_SMART_TEMP_23", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_23", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_24] =
-  {"HDD_SMART_TEMP_24", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_24", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_25] =
-  {"HDD_SMART_TEMP_25", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_25", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_26] =
-  {"HDD_SMART_TEMP_26", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_26", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_27] =
-  {"HDD_SMART_TEMP_27", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_27", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_28] =
-  {"HDD_SMART_TEMP_28", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_28", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_29] =
-  {"HDD_SMART_TEMP_29", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_29", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_30] =
-  {"HDD_SMART_TEMP_30", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_30", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_31] =
-  {"HDD_SMART_TEMP_31", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_31", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_32] =
-  {"HDD_SMART_TEMP_32", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_32", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_33] =
-  {"HDD_SMART_TEMP_33", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_33", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_34] =
-  {"HDD_SMART_TEMP_34", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_34", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_SMART_TEMP_35] =
-  {"HDD_SMART_TEMP_35", EXPANDER, NULL, false, {60, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"HDD_SMART_TEMP_35", EXPANDER, NULL, false, {65, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [HDD_P5V_SENSE_0] =
   {"HDD_P5V_SENSE_0", EXPANDER, NULL, false, {5.5, 0, 0, 4.5, 0, 0, 0, 0}, VOLT},
   [HDD_P12V_SENSE_0] =
@@ -300,11 +308,11 @@ PAL_SENSOR_MAP dpb_sensor_map[] = {
   [DPB_HSC_P12V_CLIP] =
   {"DPB_HSC_P12V_CLIP", EXPANDER, NULL, false, {13.2, 0, 0, 10.8, 0, 0, 0, 0}, VOLT},
   [DPB_HSC_CUR] =
-  {"DPB_HSC_CUR", EXPANDER, NULL, false, {73.53, 0, 0, 0, 0, 0, 0, 0}, CURR},
+  {"DPB_HSC_CUR", EXPANDER, NULL, false, {70, 0, 0, 0, 0, 0, 0, 0}, CURR},
   [DPB_HSC_CUR_CLIP] =
   {"DPB_HSC_CUR_CLIP", EXPANDER, NULL, false, {165, 0, 0, 0, 0, 0, 0, 0}, CURR},
   [DPB_HSC_PWR] =
-  {"DPB_HSC_PWR", EXPANDER, NULL, false, {920, 0, 0, 0, 0, 0, 0, 0}, POWER},
+  {"DPB_HSC_PWR", EXPANDER, NULL, false, {875, 0, 0, 0, 0, 0, 0, 0}, POWER},
   [DPB_HSC_PWR_CLIP] =
   {"DPB_HSC_PWR_CLIP", EXPANDER, NULL, false, {2062, 0, 0, 0, 0, 0, 0, 0}, POWER},
   [FAN_0_FRONT] =
@@ -331,25 +339,25 @@ PAL_SENSOR_MAP scc_sensor_map[] = {
   [SCC_EXP_TEMP] =
   {"SCC_EXP_TEMP", EXPANDER, NULL, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [SCC_IOC_TEMP] =
-  {"SCC_IOC_TEMP", EXPANDER, NULL, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"SCC_IOC_TEMP", EXPANDER, read_ioc_temp, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [SCC_TEMP_1] =
-  {"SCC_TEMP_1", EXPANDER, NULL, false, {93, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"SCC_TEMP_1", EXPANDER, NULL, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [SCC_TEMP_2] =
-  {"SCC_TEMP_2", EXPANDER, NULL, false, {93, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"SCC_TEMP_2", EXPANDER, NULL, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [SCC_P3V3_E_SENSE] =
   {"SCC_P3V3_E_SENSE", EXPANDER, NULL, false, {3.63, 0, 0, 2.97, 0, 0, 0, 0}, VOLT},
   [SCC_P1V8_E_SENSE] =
   {"SCC_P1V8_E_SENSE", EXPANDER, NULL, false, {1.89, 0, 0, 1.71, 0, 0, 0, 0}, VOLT},
   [SCC_P1V5_E_SENSE] =
-  {"SCC_P1V5_E_SENSE", EXPANDER, NULL, false, {1.52, 0, 0, 1.38, 0, 0, 0, 0}, VOLT},
+  {"SCC_P1V5_E_SENSE", EXPANDER, NULL, false, {1.52, 0, 0, 1.37, 0, 0, 0, 0}, VOLT},
   [SCC_P0V92_E_SENSE] =
   {"SCC_P0V92_E_SENSE", EXPANDER, NULL, false, {0.95, 0, 0, 0.89, 0, 0, 0, 0}, VOLT},
   [SCC_P1V8_C_SENSE] =
   {"SCC_P1V8_C_SENSE", EXPANDER, NULL, false, {1.89, 0, 0, 1.71, 0, 0, 0, 0}, VOLT},
   [SCC_P1V5_C_SENSE] =
-  {"SCC_P1V5_C_SENSE", EXPANDER, NULL, false, {1.52, 0, 0, 1.38, 0, 0, 0, 0}, VOLT},
+  {"SCC_P1V5_C_SENSE", EXPANDER, NULL, false, {1.52, 0, 0, 1.37, 0, 0, 0, 0}, VOLT},
   [SCC_P0V865_C_SENSE] =
-  {"SCC_P0V865_C_SENSE", EXPANDER, NULL, false, {0.90, 0, 0, 0.84, 0, 0, 0, 0}, VOLT},
+  {"SCC_P0V865_C_SENSE", EXPANDER, NULL, false, {0.89, 0, 0, 0.83, 0, 0, 0, 0}, VOLT},
   [SCC_HSC_P12V] =
   {"SCC_HSC_P12V", EXPANDER, NULL, false, {13.2, 0, 0, 10.8, 0, 0, 0, 0}, VOLT},
   [SCC_HSC_CUR] =
@@ -361,17 +369,29 @@ PAL_SENSOR_MAP scc_sensor_map[] = {
 PAL_SENSOR_MAP nic_sensor_map[] = {
   [NIC_SENSOR_TEMP] =
   {"NIC_SENSOR_TEMP", NIC, read_nic_temp, true, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  [NIC_SENSOR_P12V] =
+  {"NIC_SENSOR_P12V", ADC128_IN6, read_adc128_nic, false, {13, 0, 0, 11, 0, 0, 0, 0}, VOLT},
+  [NIC_SENSOR_CUR] =
+  {"NIC_SENSOR_CUR", ADC128_IN7, read_adc128_nic, false, {2.2, 0, 0, 0, 0, 0, 0, 0}, CURR},
 };
 
 PAL_SENSOR_MAP e1s_sensor_map[] = {
   [E1S0_CUR] =
-  {"E1S_X0_CUR", ADC128_IN0, read_adc128, false, {1.1, 0, 0, 0, 0, 0, 0, 0}, CURR},
+  {"E1S_X0_CUR", ADC128_IN0, read_adc128_e1s, false, {1.6, 0, 0, 0, 0, 0, 0, 0}, CURR},
   [E1S1_CUR] =
-  {"E1S_X1_CUR", ADC128_IN1, read_adc128, false, {1.1, 0, 0, 0, 0, 0, 0, 0}, CURR},
+  {"E1S_X1_CUR", ADC128_IN1, read_adc128_e1s, false, {1.6, 0, 0, 0, 0, 0, 0, 0}, CURR},
   [E1S0_TEMP] =
   {"E1S_X0_TEMP", T5_E1S0_T7_IOC_AVENGER, read_e1s_temp, false, {0, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [E1S1_TEMP] =
   {"E1S_X1_TEMP", T5_E1S1_T7_IOCM_VOLT, read_e1s_temp, false, {0, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  [E1S0_P12V] =
+  {"E1S_X0_P12V", ADC128_IN2, read_adc128_e1s, false, {13, 0, 0, 11, 0, 0, 0, 0}, VOLT},
+  [E1S1_P12V] =
+  {"E1S_X1_P12V", ADC128_IN3, read_adc128_e1s, false, {13, 0, 0, 11, 0, 0, 0, 0}, VOLT},
+  [E1S0_P3V3] =
+  {"E1S_X0_P3V3", ADC128_IN4, read_adc128_e1s, false, {3.465, 0, 0, 2.97, 0, 0, 0, 0}, VOLT},
+  [E1S1_P3V3] =
+  {"E1S_X1_P3V3", ADC128_IN5, read_adc128_e1s, false, {3.465, 0, 0, 2.97, 0, 0, 0, 0}, VOLT},
 };
 
 PAL_SENSOR_MAP iocm_sensor_map[] = {
@@ -384,11 +404,11 @@ PAL_SENSOR_MAP iocm_sensor_map[] = {
   [IOCM_P0V865] =
   {"IOCM_P0V865", ADS1015_IN3, read_ads1015, false, {0.89, 0, 0, 0.85, 0, 0, 0, 0}, VOLT},
   [IOCM_CUR] =
-  {"IOCM_CUR", ADC128_IN0, read_adc128, false, {0, 0, 0, 0, 0, 0, 0, 0}, CURR},
+  {"IOCM_CUR", ADC128_IN0, read_adc128_iocm, false, {0, 0, 0, 0, 0, 0, 0, 0}, CURR},
   [IOCM_TEMP] =
-  {"IOCM_TEMP", T5_E1S0_T7_IOC_AVENGER, read_ioc_temp, false, {93, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"IOCM_TEMP", TEMP_IOCM, read_temp, false, {93, 0, 0, 0, 0, 0, 0, 0}, TEMP},
   [IOCM_IOC_TEMP] =
-  {"IOCM_IOC_TEMP", TEMP_IOCM, read_temp, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
+  {"IOCM_IOC_TEMP", TEMP_IOCM, read_ioc_temp, false, {95, 0, 0, 0, 0, 0, 0, 0}, TEMP},
 };
 
 const uint8_t server_sensor_list[] = {
@@ -603,6 +623,8 @@ const uint8_t scc_sensor_list[] = {
 
 const uint8_t nic_sensor_list[] = {
   NIC_SENSOR_TEMP,
+  NIC_SENSOR_P12V,
+  NIC_SENSOR_CUR,
 };
 
 const uint8_t e1s_sensor_list[] = {
@@ -610,6 +632,10 @@ const uint8_t e1s_sensor_list[] = {
   E1S1_CUR,
   E1S0_TEMP,
   E1S1_TEMP,
+  E1S0_P12V,
+  E1S1_P12V,
+  E1S0_P3V3,
+  E1S1_P3V3,
 };
 
 const uint8_t iocm_sensor_list[] = {
@@ -646,18 +672,38 @@ const char *adc_label[] = {
 
 PAL_DEV_INFO temp_dev_list[] = {
   {"tmp75-i2c-4-4a",  "UIC_INLET_TEMP"},
-  {"tmp75-i2c-13-4a", "IOCM_IOC_TEMP"},
+  {"tmp75-i2c-13-4a", "IOCM_TEMP"},
 };
 
 PAL_DEV_INFO adc128_dev_list[] = {
   {"adc128d818-i2c-9-1d",  "E1S0_CUR"},
   {"adc128d818-i2c-9-1d",  "E1S1_CUR"},
+  {"adc128d818-i2c-9-1d",  "E1S0_P12V"},
+  {"adc128d818-i2c-9-1d",  "E1S1_P12V"},
+  {"adc128d818-i2c-9-1d",  "E1S0_P3V3"},
+  {"adc128d818-i2c-9-1d",  "E1S1_P3V3"},
+  {"adc128d818-i2c-9-1d",  "NIC_P12V"},
+  {"adc128d818-i2c-9-1d",  "NIC_CUR"},
 };
 
 // ADS1015 PGA settings in DTS of each channel, unit: mV
 static int ads1015_pga_setting[] = {
   4096, 2048, 2048, 1024
 };
+
+static inlet_corr_t g_ict[] = {
+  //airflow, offset value
+  { 0,  8 },    // airflow: 0-44
+  { 45, 5 },    // airflow: 45-63
+  { 64, 4 },    // airflow: 64-74
+  { 75, 3.5 },  // airflow: 75-96
+  { 97, 3 },    // airflow: 97-109
+  { 110, 2.5 }, // airflow: 110-140
+  { 141, 2 },   // airflow: 141-295
+  { 296, 1.5 }, // airflow: 296-369
+};
+
+static uint8_t g_ict_count = sizeof(g_ict)/sizeof(inlet_corr_t);
 
 
 size_t server_sensor_cnt = ARRAY_SIZE(server_sensor_list);
@@ -896,11 +942,9 @@ read_e1s_temp(uint8_t e1s_id, float *value) {
   uint8_t tbuf[1] = {0};
   uint8_t rbuf[NVMe_GET_STATUS_LEN] = {0};
 
-  if (e1s_id >= ARRAY_SIZE(e1s_info_list)) {
-    return ERR_SENSOR_NA;
-  }
-
-  if (is_e1s_iocm_present(e1s_id) == false) {
+  if ((e1s_id >= ARRAY_SIZE(e1s_info_list)) ||
+      (is_e1s_iocm_present(e1s_id) == false) ||
+      (is_e1s_iocm_i2c_enabled(e1s_id) == false)) {
     return ERR_SENSOR_NA;
   }
 
@@ -930,8 +974,74 @@ read_e1s_temp(uint8_t e1s_id, float *value) {
   return ret;
 }
 
+static bool
+is_e1s_power_good(uint8_t id) {
+  uint8_t e1s_pwr_status = 0, type = 0;
+
+  if (pal_get_device_power(FRU_SERVER, (id + 1), &e1s_pwr_status, &type) < 0) { // id is 1 base here
+    return false;
+  }
+
+  if (e1s_pwr_status == DEVICE_POWER_OFF) {
+    return false;
+  }
+
+  return true;
+}
+
 static int
-read_adc128(uint8_t id, float *value) {
+read_adc128_e1s(uint8_t id, float *value) {
+  int ret = 0;
+  static uint8_t e1s_adc_skip_times[ADC128_E1S_PIN_CNT] = {0};
+
+  if (id >= ARRAY_SIZE(adc128_dev_list)) {
+    return ERR_SENSOR_NA;
+  }
+
+  if (is_e1s_iocm_present(id % 2) == false) {
+    return ERR_SENSOR_NA;
+  }
+
+  if (is_e1s_power_good(id % 2) == false) {
+    e1s_adc_skip_times[id] = MAX_E1S_VOL_SNR_SKIP;
+    return ERR_SENSOR_NA;
+  }
+
+  if (e1s_adc_skip_times[id] != 0) { // wait sensor reading ready while E1.S power on
+    e1s_adc_skip_times[id]--;
+    return READING_SKIP;
+  }
+
+  ret = sensors_read(adc128_dev_list[id].chip, adc128_dev_list[id].label, value);
+
+  return ret;
+}
+
+static int
+read_adc128_nic(uint8_t id, float *value) {
+  int ret = 0;
+  uint8_t prsnt_status = 0;
+
+  if (id >= ARRAY_SIZE(adc128_dev_list)) {
+    return ERR_SENSOR_NA;
+  }
+
+  if ((pal_is_fru_prsnt(FRU_NIC, &prsnt_status) < 0) || 
+      (prsnt_status == FRU_ABSENT)) {
+    return ERR_SENSOR_NA;
+  }
+
+  ret = sensors_read(adc128_dev_list[id].chip, adc128_dev_list[id].label, value);
+
+  if ((id == ADC128_IN7) && (*value < 0)) { // NIC current doesn't support negative value
+    *value = 0;
+  }
+
+  return ret;
+}
+
+static int
+read_adc128_iocm(uint8_t id, float *value) {
   int ret = 0;
 
   if (id >= ARRAY_SIZE(adc128_dev_list)) {
@@ -943,8 +1053,6 @@ read_adc128(uint8_t id, float *value) {
   }
 
   ret = sensors_read(adc128_dev_list[id].chip, adc128_dev_list[id].label, value);
-  // I_OUT(A) = V_IMON(V) * 10^6 / G_IMON(uA/A) / R_IMON(ohm)
-  *value = (*value) * 1000000 / ADC128_GIMON / ADC128_RIMON;
 
   return ret;
 }
@@ -1066,8 +1174,51 @@ read_ads1015(uint8_t id, float *value) {
 
 static int
 read_ioc_temp(uint8_t id, float *value) {
-  //Todo: wait IOC FW
-  return ERR_SENSOR_NA;
+  char key[MAX_KEY_LEN] = {0};
+  char cache_value[MAX_VALUE_LEN] = {0};
+  char fru_name[MAX_FRU_CMD_STR] = {0};
+  int ret = 0;
+
+  if (value == NULL) {
+    syslog(LOG_ERR, "%s(), Failed to read ioc temperature due to NULL parameter.\n", __func__);
+    return ERR_SENSOR_NA;
+  }
+
+  memset(key, 0, sizeof(key));
+  memset(cache_value, 0, sizeof(cache_value));
+
+  if (id == EXPANDER) {
+    if (pal_get_fru_name(FRU_SCC, fru_name) < 0) {
+      syslog(LOG_WARNING, "%s() Fail to get fru%d name\n", __func__, FRU_SCC);
+      return ERR_SENSOR_NA;
+    }
+    snprintf(key, sizeof(key), "%s_ioc_sensor%d", fru_name, SCC_IOC_TEMP);
+  } else if (id == TEMP_IOCM) {
+    if (pal_get_fru_name(FRU_E1S_IOCM, fru_name) < 0) {
+      syslog(LOG_WARNING, "%s() Fail to get fru%d name\n", __func__, FRU_E1S_IOCM);
+      return ERR_SENSOR_NA;
+    }
+    if (is_e1s_iocm_present(T5_E1S0_T7_IOC_AVENGER) == false) {
+      return ERR_SENSOR_NA;
+    }
+    snprintf(key, sizeof(key), "%s_ioc_sensor%d", fru_name, IOCM_IOC_TEMP);
+  } else {
+    return ERR_SENSOR_NA;
+  }
+
+  ret = kv_get(key, cache_value, NULL, 0);
+  if (ret != 0) {
+    syslog(LOG_ERR, "%s(), Failed to get key: %s, ret: %d\n", __func__, key, ret);
+    return ret;
+  }
+
+  if (strcmp(cache_value, "NA") == 0) {
+    return ERR_SENSOR_NA;
+  }
+
+  *value = atof(cache_value);
+
+  return ret;
 }
 
 static int
@@ -1082,6 +1233,9 @@ exp_read_sensor_wrapper(uint8_t fru, uint8_t *sensor_list, int sensor_cnt, uint8
   char units[64] = {0};
   float value = 0;
   EXPANDER_SENSOR_DATA *p_sensor_data = NULL;
+  int retry = 0, retry_ret = 0;
+  EXPANDER_SENSOR_DATA *retry_data = NULL;
+  int tach_cnt = 0;
 
   if (pal_get_fru_name(fru, fru_name)) {
     syslog(LOG_WARNING, "%s() Fail to get fru%d name\n", __func__, fru);
@@ -1110,6 +1264,8 @@ exp_read_sensor_wrapper(uint8_t fru, uint8_t *sensor_list, int sensor_cnt, uint8
     }
     return ret;
   }
+  
+  tach_cnt = pal_get_tach_cnt();
 
   p_sensor_data = (EXPANDER_SENSOR_DATA *)(&rbuf[1]);
 
@@ -1128,6 +1284,35 @@ exp_read_sensor_wrapper(uint8_t fru, uint8_t *sensor_list, int sensor_cnt, uint8
       else if (strncmp(units, "RPM", sizeof(units)) == 0) {
         value = (((p_sensor_data[i].raw_data_1 << 8) + p_sensor_data[i].raw_data_2));
         value *= 10;
+        
+        if (tach_cnt == SINGLE_FAN_CNT) {
+          if ((p_sensor_data[i].sensor_num == FAN_0_REAR) || (p_sensor_data[i].sensor_num == FAN_1_REAR) 
+           || (p_sensor_data[i].sensor_num == FAN_2_REAR) || (p_sensor_data[i].sensor_num == FAN_3_REAR)) {
+             continue;
+           }
+        } else if (tach_cnt == UNKNOWN_FAN_CNT) {
+          continue;
+        }
+        
+        // If SCC reset or power cycle, it may get wrong information from expander
+        // To avoid those case, retry to get RPM
+        retry = 0;
+        tbuf[0] = 1;
+        tbuf[1] = sensor_list[i + index];
+        while ((value == 0) && (retry++ < MAX_GET_RPM_RETRY)) {
+          syslog(LOG_WARNING, "%s(): %s_sensor%d get zero %d time\n", __func__ , fru_name, p_sensor_data[i].sensor_num, retry);
+          msleep(150);
+          
+          // get RPM again
+          retry_ret = expander_ipmb_wrapper(NETFN_OEM_REQ, CMD_OEM_EXP_GET_SENSOR_READING, tbuf, 2, rbuf, &rlen);
+          if (retry_ret < 0) {
+            continue;
+          } else {
+            retry_data = (EXPANDER_SENSOR_DATA *)(&rbuf[1]);
+            value = (((retry_data[i].raw_data_1 << 8) + retry_data[i].raw_data_2));
+            value *= 10;
+          }
+        }
       }
       else if (strncmp(units, "Watts", sizeof(units)) == 0) {
         value = (((p_sensor_data[i].raw_data_1 << 8) + p_sensor_data[i].raw_data_2));
@@ -1168,11 +1353,36 @@ expander_sensor_check(uint8_t fru, uint8_t sensor_num) {
   int ret = 0, remain = 0, sensor_cnt = 0, index = 0;
   uint8_t *sensor_list = NULL;
   int read_cnt = 1; // default is single sensor reading
+  int timestamp = 0, current_time = 0;
+  char key[MAX_KEY_LEN] = {0};
+  char cvalue[MAX_VALUE_LEN] = {0};
+  char tstr[MAX_VALUE_LEN] = {0};
+  struct timespec ts = {0};
 
-  if (fru != FRU_SCC && fru != FRU_DPB) {
-    syslog(LOG_ERR, "%s() Invalid FRU%u \n", __func__, fru);
-    return -1;
+  switch(fru) {
+    case FRU_DPB:
+      snprintf(key, sizeof(key), "dpb_sensor_timestamp");
+      break;
+    case FRU_SCC:
+      snprintf(key, sizeof(key), "scc_sensor_timestamp");
+      break;
+    default:
+      syslog(LOG_ERR, "%s() Invalid FRU%u \n", __func__, fru);
+      return -1;
   }
+
+  // Get sensor timestamp
+  ret = pal_get_cached_value(key, cvalue);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "%s() Failed to get FRU%u sensor timestamp", __func__, fru);
+    return ret;
+  }
+  timestamp = atoi(cvalue);
+
+  // Get current timestamp
+  clock_gettime(CLOCK_REALTIME, &ts);
+  snprintf(tstr, sizeof(tstr), "%ld", ts.tv_sec);
+  current_time = atoi(tstr);
 
   ret = pal_get_fru_sensor_list(fru, &sensor_list, &sensor_cnt);
   if (ret < 0) {
@@ -1186,35 +1396,57 @@ expander_sensor_check(uint8_t fru, uint8_t sensor_num) {
     return -1;
   }
 
-  if ( (fru == FRU_DPB && sensor_num == dpb_sensor_list[0]) || (fru == FRU_SCC && sensor_num == scc_sensor_list[0]) ) {
-    remain = sensor_cnt;
-
-    // read all sensors
-    while (remain > 0) {
-      read_cnt = (remain > MAX_EXP_IPMB_SENSOR_COUNT) ? MAX_EXP_IPMB_SENSOR_COUNT : remain;
-      ret = exp_read_sensor_wrapper(fru, sensor_list, read_cnt, index);
-      if (ret < 0) {
-        syslog(LOG_ERR, "%s() wrapper ret%d \n", __func__, ret);
-        break;
-      }
-      remain -= read_cnt;
-      index += read_cnt;
-    };
-
-    if (fru == FRU_DPB) {
-      is_dpb_sensor_cached = true;
-    } else {
-      is_scc_sensor_cached = true;
-    }
-  }
-  else {
-    if ( (fru == FRU_DPB && is_dpb_sensor_cached == true) || (fru == FRU_SCC && is_scc_sensor_cached == true) ) {
-      return 0;
-    }
-    // read single sensor
+  // Read DPB_HSC_PWR from expander directly
+  if ((fru == FRU_DPB) && (sensor_num == DPB_HSC_PWR)) {
     ret = exp_read_sensor_wrapper(fru, sensor_list, read_cnt, index);
     if (ret < 0) {
       syslog(LOG_ERR, "%s() wrapper ret%d \n", __func__, ret);
+    }
+    return ret;
+  }
+
+  if (abs(current_time - timestamp) > EXP_SENSOR_WAIT_TIME) {
+    if ( (fru == FRU_DPB && sensor_num == dpb_sensor_list[0]) || (fru == FRU_SCC && sensor_num == scc_sensor_list[0]) ) {
+      remain = sensor_cnt;
+
+      // read all sensors
+      while (remain > 0) {
+        read_cnt = (remain > MAX_EXP_IPMB_SENSOR_COUNT) ? MAX_EXP_IPMB_SENSOR_COUNT : remain;
+        ret = exp_read_sensor_wrapper(fru, sensor_list, read_cnt, index);
+        if (ret < 0) {
+          syslog(LOG_ERR, "%s() wrapper ret%d \n", __func__, ret);
+          break;
+        }
+        remain -= read_cnt;
+        index += read_cnt;
+      };
+
+      // Update timestamp only after all sensors updated
+      memset(tstr, 0, sizeof(tstr));
+      clock_gettime(CLOCK_REALTIME, &ts);
+      snprintf(tstr, sizeof(tstr), "%ld", ts.tv_sec);
+
+      ret = pal_set_cached_value(key, tstr);
+      if (ret < 0) {
+        syslog(LOG_WARNING, "%s() Failed to set FRU%u sensor timestamp", __func__, fru);
+        return ret;
+      }
+
+      if (fru == FRU_DPB) {
+        is_dpb_sensor_cached = true;
+      } else {
+        is_scc_sensor_cached = true;
+      }
+    }
+    else {
+      if ( (fru == FRU_DPB && is_dpb_sensor_cached == true) || (fru == FRU_SCC && is_scc_sensor_cached == true) ) {
+        return 0;
+      }
+      // read single sensor
+      ret = exp_read_sensor_wrapper(fru, sensor_list, read_cnt, index);
+      if (ret < 0) {
+        syslog(LOG_ERR, "%s() wrapper ret%d \n", __func__, ret);
+      }
     }
   }
 
@@ -1398,7 +1630,9 @@ pal_bic_sensor_read_raw(uint8_t fru, uint8_t sensor_num, float *value) {
   int ret = 0;
 
   if (access(SERVER_SENSOR_LOCK, F_OK) == 0) { // BIC is updating VR
-    return READING_SKIP;
+    if ((sensor_num >= BS_VR_VCCIN_TEMP) && (sensor_num <= BS_VR_DIMM_DE_PWR)) {
+      return READING_SKIP;
+    }
   }
 
   if (bic_get_sensor_reading(sensor_num, &sensor) < 0) {
@@ -1501,6 +1735,11 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
       ret = ERR_SENSOR_NA;
     } else {
       ret = pal_bic_sensor_read_raw(fru, sensor_num, (float*)value);
+      
+      // Inlet sensor correction
+      if (sensor_num == BS_INLET_TEMP) {
+        apply_inlet_correction((float *)value);
+      }
     }
     break;
   case FRU_UIC:
@@ -1509,10 +1748,15 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
     break;
   case FRU_DPB:
   case FRU_SCC:
-    if (0 != (ret = expander_sensor_check(fru, sensor_num))) {
-       break;
+    if (sensor_num == SCC_IOC_TEMP) {
+      id = scc_sensor_map[sensor_num].id;
+      ret = scc_sensor_map[sensor_num].read_sensor(id, (float*) value);
+    } else {
+      if (0 != (ret = expander_sensor_check(fru, sensor_num))) {
+        break;
+      }
+      ret = expander_sensor_read_cache(fru, sensor_num, key, value);
     }
-    ret = expander_sensor_read_cache(fru, sensor_num, key, value);
     break;
   case FRU_NIC:
     id = nic_sensor_map[sensor_num].id;
@@ -1799,5 +2043,42 @@ pal_get_fan_speed(uint8_t fan, int *rpm) {
   }
 
   return ret;
+}
+
+static void apply_inlet_correction(float *value) {
+  static float offset_value = 0;
+  float airflow_value = 0;
+  int i = 0, ret = 0;
+  inlet_corr_t *ict = NULL;
+  uint8_t ict_cnt = 0;
+  
+  if (value == NULL) {
+    syslog(LOG_WARNING, "%s(): fail to regulate inlet sensor because NULL parameter: *value", __func__);
+    return;
+  }
+  
+  // Get airflow value
+  ret = pal_sensor_read_raw(FRU_DPB, AIRFLOW, &airflow_value);
+  if (ret < 0) {
+     // If get airflow fail, use the previous offset
+    *(float*)value -= offset_value;
+    return;
+  }
+  
+  ict = g_ict;
+  ict_cnt = g_ict_count;
+  
+  // Scan the correction table to get correction value
+  offset_value = ict[0].offset_value;
+  for (i = 1; i < ict_cnt; i++) {
+    if (airflow_value >= ict[i].airflow_value) {
+      offset_value = ict[i].offset_value;
+    } else {
+      break;
+    }
+  }
+
+  // Apply correction for the sensor
+  *(float*)value -= offset_value;
 }
 

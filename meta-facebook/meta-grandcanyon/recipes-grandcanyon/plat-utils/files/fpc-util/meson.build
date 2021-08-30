@@ -10,6 +10,8 @@ dep_libs = [
     cc.find_library('pal'),
     dependency('libipmi'),
     dependency('libipmb'),
+    dependency('libkv'),
+    dependency('libfbgc_common'),
 ]
 
 executable('fpc-util', 'fpc-util.c', dependencies : dep_libs)

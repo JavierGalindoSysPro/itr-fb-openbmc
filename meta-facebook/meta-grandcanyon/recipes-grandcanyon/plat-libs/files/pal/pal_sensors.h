@@ -11,9 +11,10 @@
 #define NIC_INFO_TEMP_CMD            (0x1)
 
 #define MAX_EXP_IPMB_SENSOR_COUNT    40
+#define EXP_SENSOR_WAIT_TIME         5      // 5 seconds
 
+#define MAX_GET_RPM_RETRY            15
 #define MAX_NIC_TEMP_RETRY           5      // 10 seconds
-#define MAX_RETRY                    3
 #define MAX_SDR_PATH                 32
 #define SDR_PATH                     "/tmp/sdr_%s.bin"
 #define SDR_TYPE_FULL_SENSOR_RECORD  0x1
@@ -33,10 +34,6 @@
 #define NVMe_GET_STATUS_CMD          (0x00)
 #define NVMe_GET_STATUS_LEN          (8)
 #define NVMe_TEMP_REG                (0x03)
-
-// ADC128 INFO
-#define ADC128_GIMON                 (52)    // unit: (uA/A)
-#define ADC128_RIMON                 (10000) // unit: (ohm)
 
 // ADS1015 INFO
 #define IOCM_VOLTAGE_SENSOR_DIR      "/sys/bus/i2c/devices/13-0049/iio\\:device*"
@@ -298,6 +295,8 @@ enum {
 // NIC sensors
 enum {
   NIC_SENSOR_TEMP = 0x82,
+  NIC_SENSOR_P12V = 0x83,
+  NIC_SENSOR_CUR = 0x84,
 
   // PLDM numeric sensors
   NIC_SOC_TEMP = PLDM_NUMERIC_SENSOR_START,
@@ -315,6 +314,10 @@ enum {
   E1S1_CUR = 0x21,
   E1S0_TEMP = 0x22,
   E1S1_TEMP = 0x23,
+  E1S0_P12V = 0x24,
+  E1S1_P12V = 0x25,
+  E1S0_P3V3 = 0x26,
+  E1S1_P3V3 = 0x27,
 };
 
 // IOC Module sensors
@@ -346,6 +349,12 @@ enum {
 enum {
   ADC128_IN0 = 0,
   ADC128_IN1,
+  ADC128_IN2,
+  ADC128_IN3,
+  ADC128_IN4,
+  ADC128_IN5,
+  ADC128_IN6,
+  ADC128_IN7,
 };
 
 // GENERIC I2C Sensors
@@ -401,6 +410,11 @@ typedef struct {
   uint8_t sensor_status;
   uint8_t reserved;
 } EXPANDER_SENSOR_DATA;
+
+typedef struct {
+  int airflow_value;
+  float offset_value;
+} inlet_corr_t;
 
 int pal_get_fan_speed(uint8_t fan, int *rpm);
 bool is_e1s_iocm_present(uint8_t id);

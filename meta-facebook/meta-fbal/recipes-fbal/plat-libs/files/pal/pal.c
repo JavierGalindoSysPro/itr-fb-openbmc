@@ -305,7 +305,7 @@ pal_is_fru_prsnt(uint8_t fru, uint8_t *status) {
   // This MB, PDB, BMC && DBG
   if (fru == FRU_MB || fru == FRU_PDB || fru == FRU_BMC || fru == FRU_DBG) {
     *status = 1;
-  } else if ( master && (mode == MB_4S_MODE) && (fru == FRU_TRAY1_MB) ) {
+  } else if ( master && (mode == MB_4S_EX_MODE || mode == MB_4S_EP_MODE) && (fru == FRU_TRAY1_MB) ) {
     // Support tray1 MB in master BMC.
     *status = 1;
   } else if (fru == FRU_NIC0) {
@@ -709,6 +709,8 @@ pal_set_fw_update_ongoing(uint8_t fruid, uint16_t tmout) {
     return -1;
   }
 
+  if (fruid == FRU_PDB) 
+    return 0;
   index = lib_cmc_get_block_index(fruid);
   if(index < 0) {
     return -1;
@@ -1485,12 +1487,9 @@ pal_get_nm_selftest_result(uint8_t fruid, uint8_t *data)
   uint8_t rlen;
   int ret;
 
-  if (pal_skip_access_me())
-    return PAL_EOK;
-
   // If device is slave, fake the data of selftest,
-  // which is {0x55, 0x00} refer common/healthd.c line.1198
-  if (!pal_get_config_is_master()){
+  // which is {0x55, 0x00} refer common/healthd.c 
+  if (!pal_get_config_is_master() || pal_skip_access_me()){
     data[0] = 0x55;
     data[1] = 0x00;
     return PAL_EOK;
@@ -1620,15 +1619,14 @@ static int pal_ipmb_bypass (uint8_t *req_data, uint8_t req_len,
 static
 int pal_ncsi_bypass (uint8_t *req_data, uint8_t req_len,
                      uint8_t *res_data, uint8_t *res_len) {
-  uint8_t cmd, tlen;
+  uint8_t cmd;
   uint8_t channel = 0;
   uint8_t netdev = 0;
   int cc=CC_UNSPECIFIED_ERROR;
   NCSI_NL_MSG_T *msg = NULL;
   NCSI_NL_RSP_T *rsp = NULL;
 
-  tlen = req_len - 7; // payload_id, netfn, cmd, data[0] (select), netdev, channel, cmd
-  if (tlen < 0) {
+  if (req_len < 7) {  // payload_id, netfn, cmd, data[0] (select), netdev, channel, cmd
     return CC_INVALID_LENGTH;
   }
 
@@ -1647,7 +1645,7 @@ int pal_ncsi_bypass (uint8_t *req_data, uint8_t req_len,
   sprintf(msg->dev_name, "eth%d", netdev);
   msg->channel_id = channel;
   msg->cmd = cmd;
-  msg->payload_length = tlen;
+  msg->payload_length = req_len - 7;
 
   for (int i=0; i<msg->payload_length; i++) {
     msg->msg_payload[i] = req_data[4+i];
@@ -1760,10 +1758,8 @@ pal_get_cpu_amount(uint8_t* amount) {
 
     if( mode == MB_2S_MODE ) {
       cache_amount = 2;
-    } else if( mode == MB_4S_MODE ) {
+    } else if( (mode == MB_4S_EX_MODE || mode == MB_4S_EP_MODE) ) {
       cache_amount = 4;
-    } else if( mode == MB_8S_MODE ) {
-      cache_amount = 8;
     } else {
       cache_amount = 0;
     }
@@ -1789,10 +1785,8 @@ pal_get_dimm_amount(uint8_t* amount) {
 
     if( mode == MB_2S_MODE ) {
       cache_amount = 24;
-    } else if( mode == MB_4S_MODE ) {
+    } else if( (mode == MB_4S_EX_MODE || mode == MB_4S_EP_MODE) ) {
       cache_amount = 48;
-    } else if( mode == MB_8S_MODE ) {
-      cache_amount = 96;
     } else {
       cache_amount = 0;
     }
@@ -1901,7 +1895,7 @@ pal_get_syscfg_text(char *text) {
   }
 
 
-  for (dimm_index=0; dimm_index<dimm_num; dimm_index++) { // 2S:DIMM=24, 4S:DIMM=48, 8S:DIMM=96;
+  for (dimm_index=0; dimm_index<dimm_num; dimm_index++) { // 2S:DIMM=24, 4S:DIMM=48;
     sprintf(entry, "CPU%d_MEM%s:", dimm_index/12, dimm_label[dimm_index%24]);
 
     // Check Present
@@ -1937,7 +1931,7 @@ pal_get_syscfg_text(char *text) {
     if(kv_get(key, value, &ret, KV_FPERSIST) == 0 && ret >= 6) {
       dimm_speed =  value[1]<<8 | value[0];
       dimm_capacity = (value[5]<<24 | value[4]<<16 | value[3]<<8 | value[2])/1024;
-      sprintf(&entry[strlen(entry)], "%dMhz/%dGB", dimm_speed, dimm_capacity);
+      sprintf(&entry[strlen(entry)], "%dMhz/%uGB", dimm_speed, dimm_capacity);
     }
 
     sprintf(&entry[strlen(entry)], "\n");
@@ -2161,4 +2155,28 @@ int pal_i2c_write_read (uint8_t bus, uint8_t addr,
 
   i2c_cdev_slave_close(fd);
   return retCode;
+}
+
+int 
+pal_set_fw_update_state(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len)
+{
+  // Share command with fby, slot in fbal will be ignored.
+  uint8_t fruid;
+  uint16_t timeout;
+  *res_len = 0;
+  
+  // req[0] = fru id
+  // req[1] = timeout value (9 ~ 16 bits)
+  // req[2] = timeout value (1 ~  8 bits)
+  if (req_len != 3) {
+    return CC_INVALID_LENGTH;
+  }
+  fruid = req_data[0];
+  timeout = req_data[1]<<8 | req_data[2];
+
+  if (pal_set_fw_update_ongoing(fruid, timeout)) {
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  return CC_SUCCESS;
 }

@@ -20,7 +20,6 @@ PLAT_DISTRO_OVERRIDES=(
   meta-clearcreek:lf-dunfell
   meta-cloudripper:lf-dunfell
   meta-cmm:lf-dunfell
-  meta-elbert:lf-dunfell
   meta-fbal:lf-dunfell
   meta-fbep:lf-dunfell
   meta-fbsp:lf-dunfell
@@ -31,6 +30,8 @@ PLAT_DISTRO_OVERRIDES=(
   meta-qemux86:lf-dunfell
   meta-wedge400:lf-dunfell
 # zeus platforms (pending upgrade)
+  meta-elbert:zeus
+  meta-fby35:zeus
   meta-grandcanyon:zeus
 # Legacy platforms pending kernel upgrade
   meta-fby2-gpv2:rocko
@@ -111,13 +112,14 @@ if [ -z "$DISTRO_OVERRIDE" ]; then
     for override in ${PLAT_DISTRO_OVERRIDES[*]}; do
         override_plat=${override%%:*}
         override_distro=${override##*:}
-        if [[ "${platform/${override_plat}/}" != "${platform}" ]]; then
+        if [ -z "${platform/${override_plat}/}" ]; then
             # override happens
             _distro="${override_distro}"
             break
         fi
     done
 fi
+
 unset DISTRO_DEFAULT PLAT_DISTRO_OVERRIDES DISTRO_OVERRIDE
 unset override override_plat override_distro
 
@@ -127,6 +129,10 @@ unset platform
 # Sourcing the Yocto script causes the pwd to change to the build directory.
 # Keep it around so that we can source scripts out of our tree afterward.
 REPO_ROOT="$(pwd)"
+
+if [ -d "yocto/${_distro}/workaround-bin/" ]; then
+    PATH="$(realpath "yocto/${_distro}/workaround-bin"):$PATH"
+fi
 
 # shellcheck disable=SC1090
 # distro can vary, so we can't use a shellcheck directive to point to next

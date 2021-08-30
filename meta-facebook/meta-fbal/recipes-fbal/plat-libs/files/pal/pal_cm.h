@@ -87,14 +87,11 @@ enum {
 
 // CM Mode
 enum {
-  CM_MODE_8S_0 = 0x3, // 8 Socket, Tray0 is primary
-  CM_MODE_8S_1 = 0x2, // 8 Socket, Tray1 is primary
-  CM_MODE_8S_2 = 0x1, // 8 Socket, Tray2 is primary
-  CM_MODE_8S_3 = 0x0, // 8 Socket, Tray3 is primary
   CM_MODE_2S = 0x4, // 2 Socket mode.
-  CM_MODE_4S_4OU = 0x5, // 4 Socket mode in 4OU
-  CM_MODE_4S_2OU_1 = 0x6, // 4 Socket mode in 2OU with Tray 1 as primary
-  CM_MODE_4S_2OU_0 = 0x7 // 4 Socket mode in 2OU with Tray 0 as primary
+  CM_MODE_4S_EX_2OU_1 = 0x6, // 4 Socket mode in 2OU with Tray 1 as primary
+  CM_MODE_4S_EX_2OU_0 = 0x7, // 4 Socket mode in 2OU with Tray 0 as primary
+  CM_MODE_4S_EP_2OU_1 = 0x8, // 4 Socket mode in 2OU with Tray 1 as primary
+  CM_MODE_4S_EP_2OU_0 = 0x9  // 4 Socket mode in 2OU with Tray 0 as primary
 };
 
 typedef struct {
@@ -130,15 +127,15 @@ enum {
 
 int cmd_cmc_get_dev_id(ipmi_dev_id_t *dev_id);
 int cmd_cmc_get_config_mode(uint8_t *mode);
-int cmd_cmc_get_config_mode_ext(uint8_t *def_mode, uint8_t *cur_mode, uint8_t *ch_mode, uint8_t *jumpers);
+int cmd_cmc_get_config_mode_ext(uint8_t *def_mode, uint8_t *cur_mode, uint8_t *ch_mode, uint8_t *jumper);
 int cmd_cmc_reset_bmc(uint8_t pos);
-int cmd_cmc_get_mb_position(uint8_t *partion);
-int cmd_cmc_get_sensor_value(uint8_t snr_num, uint8_t *value, uint8_t* rlen);
+int cmd_cmc_get_mb_position(uint8_t *position);
+int cmd_cmc_get_sensor_value(uint8_t snr_num, uint8_t *rbuf, uint8_t* rlen);
 int cmd_cmc_set_system_mode(uint8_t mode, bool do_cycle);
 int cmd_cmc_sled_cycle(void);
 int lib_cmc_set_fan_pwm(uint8_t fan_num, uint8_t pwm);
 int lib_cmc_get_fan_pwm(uint8_t fan_num, uint8_t* pwm);
-int lib_cmc_get_fan_speed(uint8_t fan_id, uint16_t* speed);
+int lib_cmc_get_fan_speed(uint8_t fan_num, uint16_t* speed);
 int lib_cmc_set_fan_ctrl(uint8_t fan_mode, uint8_t* status);
 int lib_cmc_get_fan_id(uint8_t fan_sdr);
 int lib_cmc_power_cycle(void);

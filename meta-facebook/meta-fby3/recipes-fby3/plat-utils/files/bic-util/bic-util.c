@@ -36,6 +36,8 @@
 #include <time.h>
 
 static uint8_t bmc_location = 0xff;
+static uint8_t board = UNKNOWN_BOARD;
+static uint8_t expFru = 0;
 const static char *intf_name[4] = {"Server Board", "Front Expansion Board", "Riser Expansion Board", "Baseboard"};
 const uint8_t intf_size = 4;
 
@@ -54,6 +56,7 @@ static const char *option_list[] = {
   "--clear_cmos",
   "--file [path]",
   "--check_usb_port [sb|1ou|2ou]",
+  "--get_board_revision 1ou",
 };
 
 static const char *class2_options[] = {
@@ -65,7 +68,15 @@ print_usage_help(void) {
   int i;
 
   printf("Usage: bic-util <%s> <[0..n]data_bytes_to_send>\n", slot_usage);
+  if (board == CWC_MCHP_BOARD) {
+    printf("Usage: bic-util <%s> <2U-cwc|2U-top|2U-bot> <[0..n]data_bytes_to_send>\n", slot_usage);
+  }
   printf("Usage: bic-util <%s> <option>\n", slot_usage);
+  if (board == CWC_MCHP_BOARD) {
+    printf("Usage: bic-util <%s> <2U-cwc|2U-top|2U-bot> <option>\n", slot_usage);
+  } else {
+    printf("Usage: bic-util <%s> <2ou> <--reset|--get_gpio|--set_gpio|--get_dev_id>\n", slot_usage);
+  }
   printf("       option:\n");
   for (i = 0; i < sizeof(option_list)/sizeof(option_list[0]); i++)
     printf("       %s\n", option_list[i]);
@@ -77,11 +88,69 @@ print_usage_help(void) {
   }
 }
 
+static int
+util_check_exp_status(uint8_t exp) {
+  uint8_t status = 0, intf = 0;
+  int ret = 0;
+
+  switch (exp) {
+    case FRU_CWC:
+      intf = REXP_BIC_INTF;
+      break;
+    case FRU_2U_TOP:
+      intf = RREXP_BIC_INTF1;
+      break;
+    case FRU_2U_BOT:
+      intf = RREXP_BIC_INTF2;
+      break;
+    default:
+      printf("Unknown exp fru : %d\n", exp);
+      return -1;
+  }
+
+  ret = pal_is_fru_prsnt(exp, &status);
+
+  if (ret < 0) {
+    printf("unable to check fru presence\n");
+  } else {
+    if (status == 1) {
+      ret = pal_get_exp_power(exp, &status);
+    } else {
+      printf("Fru is empty, unable to check BIC status\n");
+      return -1;
+    }
+  }
+
+  if (ret < 0) {
+    printf("unable to check fru power\n");
+  } else {
+    if (status == SERVER_12V_ON) {
+      if ( is_bic_ready(exp, intf) == BIC_STATUS_SUCCESS ) {
+        printf("BIC status ok\n");
+        ret = 0;
+      } else {
+        printf("Error: BIC not ready\n");
+        ret = -1;
+      }
+    } else {
+      printf("Fru is 12V-off, unable to check BIC status\n");
+      ret = -1;
+    }
+  }
+
+  return ret;
+}
+
 // Check BIC status
 static int
 util_check_status(uint8_t slot_id) {
   int ret = 0;
   uint8_t status;
+
+  if (slot_id == FRU_SLOT1 && 
+      (expFru == FRU_CWC || expFru == FRU_2U_TOP || expFru == FRU_2U_BOT)) {
+    return util_check_exp_status(expFru);
+  }
 
   // BIC status is only valid if 12V-on. check this first
   ret = pal_get_server_12v_power(slot_id, &status);
@@ -113,11 +182,11 @@ util_check_status(uint8_t slot_id) {
 
 // Test to Get device ID
 static int
-util_get_device_id(uint8_t slot_id) {
+util_get_device_id(uint8_t slot_id, uint8_t intf) {
   int ret = 0;
   ipmi_dev_id_t id = {0};
 
-  ret = bic_get_dev_id(slot_id, &id, NONE_INTF);
+  ret = bic_get_dev_id(slot_id, &id, intf);
   if (ret) {
     printf("util_get_device_id: bic_get_dev_id returns %d\n", ret);
     return ret;
@@ -138,9 +207,9 @@ util_get_device_id(uint8_t slot_id) {
 
 // reset BIC
 static int
-util_bic_reset(uint8_t slot_id) {
+util_bic_reset(uint8_t slot_id, uint8_t intf) {
   int ret = 0;
-  ret = bic_reset(slot_id);
+  ret = bic_reset(slot_id, intf);
   printf("Performing BIC reset, status %d\n", ret);
   return ret;
 }
@@ -169,7 +238,7 @@ util_is_numeric(char **argv) {
 }
 
 static int
-process_command(uint8_t slot_id, int argc, char **argv) {
+process_command(uint8_t slot_id, int argc, char **argv, uint8_t intf) {
   int i, ret, retry = 2;
   uint8_t tbuf[256] = {0x00};
   uint8_t rbuf[256] = {0x00};
@@ -181,12 +250,13 @@ process_command(uint8_t slot_id, int argc, char **argv) {
   }
 
   while (retry >= 0) {
-    ret = bic_ipmb_wrapper(slot_id, tbuf[0]>>2, tbuf[1], &tbuf[2], tlen-2, rbuf, &rlen);
+    ret = bic_ipmb_send(slot_id, tbuf[0]>>2, tbuf[1], &tbuf[2], tlen-2, rbuf, &rlen, intf);
     if (ret == 0)
       break;
 
     retry--;
   }
+
   if (ret) {
     printf("BIC no response!\n");
     return ret;
@@ -233,7 +303,7 @@ process_file(uint8_t slot_id, char *path) {
       continue;
     }
 
-    process_command(slot_id, argc, argv);
+    process_command(slot_id, argc, argv, NONE_INTF);
   }
   fclose(fp);
 
@@ -244,22 +314,30 @@ process_file(uint8_t slot_id, char *path) {
            ((((uint8_t*)&list)[index/8]) >> (index % 8)) & 0x1\
 
 static int
-util_get_gpio(uint8_t slot_id) {
+util_get_gpio(uint8_t slot_id, uint8_t intf) {
   int ret = 0;
   uint8_t i;
-  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size();
+  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size(intf);
   char gpio_pin_name[32] = "\0";
   bic_gpio_t gpio = {0};
 
-  ret = bic_get_gpio(slot_id, &gpio, NONE_INTF);
+  ret = bic_get_gpio(slot_id, &gpio, intf);
   if ( ret < 0 ) {
     printf("%s() bic_get_gpio returns %d\n", __func__, ret);
     return ret;
   }
 
+  if (expFru > 0) {
+    gpio_pin_cnt = fby3_get_exp_gpio_list_size(expFru);
+  }
+
   // Print the gpio index, name and value
   for (i = 0; i < gpio_pin_cnt; i++) {
-    fby3_get_gpio_name(slot_id, i, gpio_pin_name);
+    if (expFru > 0) {
+      fby3_get_exp_gpio_name(expFru, i, gpio_pin_name);
+    } else {
+      fby3_get_gpio_name(slot_id, i, gpio_pin_name, intf);
+    }
     printf("%d %s: %d\n",i , gpio_pin_name, BIT_VALUE(gpio, i));
   }
 
@@ -267,20 +345,28 @@ util_get_gpio(uint8_t slot_id) {
 }
 
 static int
-util_set_gpio(uint8_t slot_id, uint8_t gpio_num, uint8_t gpio_val) {
-  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size();
+util_set_gpio(uint8_t slot_id, uint8_t gpio_num, uint8_t gpio_val, uint8_t intf) {
+  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size(intf);
   char gpio_pin_name[32] = "\0";
   int ret = -1;
+
+  if (expFru > 0) {
+    gpio_pin_cnt = fby3_get_exp_gpio_list_size(expFru);
+  }
 
   if ( gpio_num > gpio_pin_cnt ) {
     printf("slot %d: Invalid GPIO pin number %d\n", slot_id, gpio_num);
     return ret;
   }
 
-  fby3_get_gpio_name(slot_id, gpio_num, gpio_pin_name);
+  if (expFru > 0) {
+    fby3_get_exp_gpio_name(expFru, gpio_num, gpio_pin_name);
+  } else {
+    fby3_get_gpio_name(slot_id, gpio_num, gpio_pin_name, intf);
+  }
   printf("slot %d: setting [%d]%s to %d\n", slot_id, gpio_num, gpio_pin_name, gpio_val);
 
-  ret = bic_set_gpio(slot_id, gpio_num, gpio_val);
+  ret = remote_bic_set_gpio(slot_id, gpio_num, gpio_val, intf);
   if (ret < 0) {
     printf("%s() bic_set_gpio returns %d\n", __func__, ret);
   }
@@ -292,13 +378,13 @@ static int
 util_get_gpio_config(uint8_t slot_id) {
   int ret = 0;
   uint8_t i;
-  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size();
+  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size(NONE_INTF);
   char gpio_pin_name[32] = "\0";
   bic_gpio_config_t gpio_config = {0}; 
 
   // Print the gpio index, name and value
   for (i = 0; i < gpio_pin_cnt; i++) {
-    fby3_get_gpio_name(slot_id, i, gpio_pin_name);
+    fby3_get_gpio_name(slot_id, i, gpio_pin_name, NONE_INTF);
     //printf("%d %s: %d\n",i , gpio_pin_name, BIT_VALUE(gpio, i));
     ret = bic_get_gpio_config(slot_id, i, (uint8_t *)&gpio_config);
     if ( ret < 0 ) {
@@ -327,7 +413,7 @@ util_get_gpio_config(uint8_t slot_id) {
 static int
 util_set_gpio_config(uint8_t slot_id, uint8_t gpio_num, uint8_t config_val) {
   int ret = 0;
-  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size();
+  uint8_t gpio_pin_cnt = fby3_get_gpio_list_size(NONE_INTF);
   char gpio_pin_name[32] = "\0";
 
   if ( gpio_num > gpio_pin_cnt ) {
@@ -335,7 +421,7 @@ util_set_gpio_config(uint8_t slot_id, uint8_t gpio_num, uint8_t config_val) {
     return ret;
   }
 
-  fby3_get_gpio_name(slot_id, gpio_num, gpio_pin_name);
+  fby3_get_gpio_name(slot_id, gpio_num, gpio_pin_name, NONE_INTF);
   printf("slot %d: setting GPIO [%d]%s config to 0x%02x\n", slot_id, gpio_num, gpio_pin_name, config_val);
   ret = bic_set_gpio_config(slot_id, gpio_num, config_val);
   if (ret < 0) {
@@ -346,7 +432,7 @@ util_set_gpio_config(uint8_t slot_id, uint8_t gpio_num, uint8_t config_val) {
 }
 
 static int
-util_perf_test(uint8_t slot_id, int loopCount) {
+util_perf_test(uint8_t slot_id, int loopCount, uint8_t intf) {
 #define NUM_SLOTS FRU_SLOT4
   enum cmd_profile_type {
     CMD_AVG_DURATION = 0x0,
@@ -378,7 +464,7 @@ util_perf_test(uint8_t slot_id, int loopCount) {
   while(1) {
     gettimeofday(&tv1, NULL);
 
-    ret = bic_get_dev_id(slot_id, &id, NONE_INTF);
+    ret = bic_get_dev_id(slot_id, &id, intf);
     if (ret) {
       printf("util_perf_test: bic_get_dev_id returns %d, loop=%d\n", ret, i);
       return ret;
@@ -788,6 +874,86 @@ error_exit:
   return -1;
 }
 
+
+
+static int
+util_get_board_revision(uint8_t slot_id, char *comp) {
+  int ret = 0;
+  int retry = 0;
+  uint8_t type_1ou = 0;
+  uint8_t tbuf[5] = {0x9C, 0x9C, 0x00, 0x00, 0x00};
+  uint8_t rbuf[256] = {0};
+  uint8_t tlen = 5;
+  uint8_t rlen = 0;
+  uint8_t board_rev_id0 = 0, board_rev_id1 = 0, board_rev_id2 = 0;
+
+  if (strcmp("1ou", comp) == 0) {
+    ret = bic_is_m2_exp_prsnt_cache(slot_id);
+    if ( ret < 0 ) {
+      printf("Couldn't read bic_is_m2_exp_prsnt_cache\n");
+      return -1;
+    }
+
+    if ( (ret & PRESENT_1OU) != PRESENT_1OU ) {
+      printf("1OU board is not present\n");
+      return -1;
+    }
+
+    if ( bic_get_1ou_type(slot_id, &type_1ou) < 0 || type_1ou != EDSFF_1U ) {
+      printf("get_board_revision only support in E1S 1OU board, board type %02X (Expected: %02X)\n", type_1ou, EDSFF_1U);
+      return -1;
+    }
+
+    tbuf[4] = 50; //FW_BOARD_REV_ID0
+    do {
+      ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_SINGLE_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen, FEXP_BIC_INTF);
+    } while (ret && (retry++ <= 3));
+    if (ret) {
+      printf("get BOARD_REV_ID0 fail, retry 3 times\n");
+      return -1;
+    }
+    board_rev_id0 = rbuf[3] ? 1 : 0;
+    printf("BOARD_REV_ID0: %d\n", board_rev_id0);
+
+    tbuf[4] = 51; //FW_BOARD_REV_ID1
+    retry = 0;
+    do {
+      ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_SINGLE_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen, FEXP_BIC_INTF);
+    } while (ret && (retry++ <= 3));
+    if (ret) {
+      printf("get BOARD_REV_ID1 fail, retry 3 times\n");
+      return -1;
+    }
+    board_rev_id1 = rbuf[3] ? 1 : 0;
+    printf("BOARD_REV_ID1: %d\n", board_rev_id1);
+
+    tbuf[4] = 73; //FW_BOARD_REV_ID2
+    retry = 0;
+    do {
+      ret = bic_ipmb_send(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_SINGLE_GPIO_CONFIG, tbuf, tlen, rbuf, &rlen, FEXP_BIC_INTF);
+    } while (ret && (retry++ <= 3));
+    if (ret) {
+      printf("get BOARD_REV_ID2 fail, retry 3 times\n");
+      return -1;
+    }
+    board_rev_id2 = rbuf[3] ? 1 : 0;
+    printf("BOARD_REV_ID2: %d\n", board_rev_id2);
+
+    if ( board_rev_id0 && board_rev_id1 ) {
+      printf("Efuse: Maxim, ");
+    } else {
+      printf("Efuse: TI, ");
+    }
+
+    if ( board_rev_id2 ) {
+      printf("Clock buffer: IDT1 \n");
+    } else {
+      printf("Clock buffer: IDT2 \n");
+    }
+  }
+  return 0;
+}
+
 static int
 util_check_usb_port(uint8_t slot_id, char *comp) {
   int ret = -1;
@@ -858,7 +1024,12 @@ main(int argc, char **argv) {
   int ret = 0;
   uint8_t gpio_num = 0;
   uint8_t gpio_val = 0;
+  uint8_t intf = NONE_INTF;
   int i = 0;
+
+  if (pal_is_cwc() == PAL_EOK) {
+    board = CWC_MCHP_BOARD;
+  }
 
   if (argc < 3) {
     goto err_exit;
@@ -889,16 +1060,69 @@ main(int argc, char **argv) {
     }
   }
 
+  if (board == CWC_MCHP_BOARD && argc >= 4) {
+    if ( !fby3_common_get_exp_id(argv[2], &expFru) ) {
+      for (i = 2; i < argc - 1; ++i ) {
+        argv[i] = argv[i+1];  //remove additional cwc option to remain the order of options
+      }
+
+      argc--;
+    }
+  }
+
+  if (board == CWC_MCHP_BOARD) {
+    switch (expFru) {
+      case FRU_CWC:
+        intf = REXP_BIC_INTF;
+        break;
+      case FRU_2U_TOP:
+        intf = RREXP_BIC_INTF1;
+        break;
+      case FRU_2U_BOT:
+        intf = RREXP_BIC_INTF2;
+        break;
+    }
+  } else {
+    // get the argv_idx and intf
+    if ( strncmp(argv[2], "2ou", 3) == 0 ) intf = REXP_BIC_INTF;
+
+    // check if 1/2OU present
+    if ( intf != NONE_INTF ) {
+      ret = bic_is_m2_exp_prsnt_cache(slot_id);
+      if ( ret < 0 ) {
+        printf("Couldn't read bic_is_m2_exp_prsnt_cache\n");
+        return BIC_STATUS_FAILURE;
+      }
+
+      //return if the 1ou/2ou is not present
+      if ( intf == FEXP_BIC_INTF ) {
+        if ( (bmc_location == NIC_BMC) || (ret & PRESENT_1OU) != PRESENT_1OU ) {
+          printf("1OU is not present\n");
+          return BIC_STATUS_FAILURE;
+        }
+      } else {
+        if ( (ret & PRESENT_2OU) != PRESENT_2OU ) {
+          printf("2OU is not present\n");
+          return BIC_STATUS_FAILURE;
+        }
+      }
+
+      // adjust the content since we dont want to modify the logic below
+      memmove(&argv[2], &argv[3], sizeof(char*) * (argc - 3));
+      argc--;
+    }
+  }
+
   if ( strncmp(argv[2], "--", 2) == 0 ) {
     if ( strcmp(argv[2], "--get_gpio") == 0 ) {
-      return util_get_gpio(slot_id);
+      return util_get_gpio(slot_id, intf);
     } else if ( strcmp(argv[2], "--set_gpio") == 0 ) {
       if ( argc != 5 ) goto err_exit;
 
       gpio_num = atoi(argv[3]);
       gpio_val = atoi(argv[4]);
       if ( gpio_num > 0xff || gpio_val > 1 ) goto err_exit;
-      return util_set_gpio(slot_id, gpio_num, gpio_val);
+      return util_set_gpio(slot_id, gpio_num, gpio_val, intf);
     } else if ( strcmp(argv[2], "--get_gpio_config") == 0 ) {
       return util_get_gpio_config(slot_id);
     } else if ( strcmp(argv[2], "--set_gpio_config") == 0 ) {
@@ -911,18 +1135,18 @@ main(int argc, char **argv) {
     } else if ( strcmp(argv[2], "--check_status") == 0 ) {
       return util_check_status(slot_id);
     } else if ( strcmp(argv[2], "--get_dev_id") == 0 ) {
-      return util_get_device_id(slot_id);
+      return util_get_device_id(slot_id, intf);
     } else if ( strcmp(argv[2], "--get_sdr") == 0 ) {
       return util_get_sdr(slot_id);
     } else if ( strcmp(argv[2], "--read_sensor") == 0 ) {
       return util_read_sensor(slot_id);
     } else if ( strcmp(argv[2], "--reset") == 0 ) {
-      return util_bic_reset(slot_id);
+      return util_bic_reset(slot_id, intf);
     } else if ( strcmp(argv[2], "--get_post_code") == 0 ) {
       return util_get_postcode(slot_id);
     } else if ( strcmp(argv[2], "--perf_test") == 0 ) {
       if ( argc != 4 ) goto err_exit;
-      else return util_perf_test(slot_id, atoi(argv[3]));
+      else return util_perf_test(slot_id, atoi(argv[3]), intf);
     } else if (!strcmp(argv[2], "--clear_cmos")) {
       if (argc != 3) goto err_exit;
       return util_bic_clear_cmos(slot_id);
@@ -957,13 +1181,21 @@ main(int argc, char **argv) {
       }
 
       return util_get_slot_id();
+    } else if ( strcmp(argv[2], "--get_board_revision") == 0 ) {
+      if ( argc != 4 ) goto err_exit;
+      if ( (strcmp("1ou", argv[3]) != 0) ) {
+        printf("Invalid component: %s\n", argv[3]);
+        goto err_exit;
+      }
+      return util_get_board_revision(slot_id, argv[3]);
+
     } else {
       printf("Invalid option: %s\n", argv[2]);
       goto err_exit;
     }
   } else if (argc >= 4) {
     if (util_is_numeric(argv + 2)) {
-      return process_command(slot_id, (argc - 2), (argv + 2));
+      return process_command(slot_id, (argc - 2), (argv + 2), intf);
     } else {
       goto err_exit;
     }

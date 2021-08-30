@@ -23,7 +23,7 @@ PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
 declare -a DEVICES
 DEVICES=(
   I2C:0x1
-  SCM-BMC:0x2  
+  SCM-BMC:0x2
 )
 
 declare -a MODULES
@@ -63,8 +63,8 @@ resetModuleDeviceAll(){
     for key in ${MODULES[*]}; do
         module=${key%%:*}
         m_value=${key##*:}
-        if [ "${module}" = $1 ]; then
-            echo "Resetting ${module} module and the device on SMC-BMC and the i2c endpoints"
+        if [[ "${module}" = "$1" || -z "$1" ]]; then
+            echo "Resetting ${module} module and the device on SCM-BMC and the i2c endpoints"
             for dev in ${DEVICES[*]}; do
                 device=${dev%%:*}
                 d_value=${dev##*:}
@@ -73,16 +73,18 @@ resetModuleDeviceAll(){
                 echo ${d_value} > /sys/bus/i2c/drivers/cmmcpld/13-003e/one_wire_rst_device
                 echo ${m_value} > /sys/bus/i2c/drivers/cmmcpld/13-003e/one_wire_rst_trig
             done
-            break
+            #Only reset one LC/FC
+            if [ -n "$1" ]; then
+                break
+            fi
         fi
     done
-    if [ ${module} != $1 ]; then
-        echo "Unsupported Module entered or wrong command usage. To see list of supported modules/devices"
-        echo "Please run 'cmm-modules-devices-reset view-modules-devices' without the single quotes."
-        echo "Command Usage is: <cmm-modules-devices-reset.sh><module_name>[Optional:which_device] or "
-        echo "<cmm-modules-devices-reset.sh><module_name><all>"
+
+    if [[ -n "$1" && ${module} != "$1" ]]; then
+        echo "Error: unsupported module name <$1>!"
+        usage
     fi
-  unset module value
+    unset module value
 }
 
 #Resetting a specific device from a module
@@ -90,8 +92,8 @@ resetModuleDevice(){
     for key in ${MODULES[*]}; do
         module=${key%%:*}
         m_value=${key##*:}
-        if [ "${module}" = $1 ]; then
-            if [ $2 = "all" ]; then
+        if [ "${module}" = "$1" ]; then
+            if [ "$2" = "all" ]; then
                 resetModuleDeviceAll $module
                 unset module m_value
                 return
@@ -111,45 +113,57 @@ resetModuleDevice(){
             fi
         fi
     done
-    if  [ ${module} != $1 ] || [ ${device} != $2 ]; then 
-        echo "Unsupported Module/Device entered or wrong command usage. To see list of supported modules/devices"
-        echo "Please run 'cmm-modules-devices-reset view-modules-devices' without the single quotes."
-        echo "Command Usage is: <cmm-modules-devices-reset.sh><module_name>[Optional:which_device] or "
-        echo "<cmm-modules-devices-reset.sh><module_name><all>"
+
+    if  [[ ${module} != "$1" || ${device} != "$2" ]]; then
+        echo "Error: unsupported module/device name!"
+        usage
     fi
     unset module m_value device d_value
 }
 
 #List supported modules and devices for the user
 viewModuleDevices(){
-    echo "Listing available modules:"
+    echo "Available modules:"
     for key in ${MODULES[*]}; do
         module=${key%%:*}
-        echo "$module"     
+        echo "$module"
     done
-    echo -e "\nListing available devices:"
+    echo -e "\nAvailable devices:"
 
     for key in ${DEVICES[*]}; do
         device=${key%%:*}
-        echo "$device"     
+        echo "$device"
     done
     unset module device
 }
 
+usage() {
+    echo "Usage: cmm-modules-devices-reset.sh <module> [device] | all"
+    echo ""
+
+    viewModuleDevices
+
+    echo ""
+    echo "Example: cmm-modules-devices-reset.sh LC101"
+    echo "Example reset all LC/FC: cmm-modules-devices-reset.sh all"
+}
+
 #parse command line arguments
 if [ $# == 0 ]; then
-      echo "please enter the module name."
-      echo "If unsure what modules/devices are available"
-      echo "Please run 'cmm-modules-devices-reset view-modules-devices' without the single quotes."
-elif [ $# == 1 ]; then 
-    if [ $1 = "view-modules-devices" ]; then
-          viewModuleDevices
-      else
-          resetModuleDeviceAll $1
-     fi
+    echo "Error: <module> parameter is missing!"
+    usage
+elif [ $# == 1 ]; then
+    if [ "$1" = "view-modules-devices" ]; then
+        viewModuleDevices
+    elif [ "$1" = "all" ]; then
+        resetModuleDeviceAll
+    else
+        resetModuleDeviceAll "$1"
+    fi
 elif [ $# == 2 ]; then
-      resetModuleDevice $1 $2
+    resetModuleDevice "$1" "$2"
 else
-      echo "error wrong command"
-      exit 1
+    echo "Error: invalid command line arguments!"
+    usage
+    exit 1
 fi

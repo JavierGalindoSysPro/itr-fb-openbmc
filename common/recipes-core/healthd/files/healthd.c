@@ -95,9 +95,14 @@
 #define SLED_TS_TIMEOUT 100    //SLED Time Sync Timeout
 
 #define KV_KEY_IMAGE_VERSIONS "image_versions"
+#define KV_KEY_HEALTHD_REARM  "healthd_rearm"
 
 #define BIC_HEALTH_INTERVAL 60 //seconds
 #define BIC_RESET_ERR_CNT   3
+
+#define LOG_REARM_CHECK_INTERVAL 3 // seconds
+
+#define MAX_LOG_SIZE 128
 
 struct i2c_bus_s {
   uint32_t offset;
@@ -151,6 +156,13 @@ enum ASSERT_BIT {
   BIT_UNRECOVERABLE_ECC  = 3,
 };
 
+enum BIC_ERROR {
+  BIC_HB_ERR = 0,
+  BIC_IPMB_ERR,
+  BIC_READY_ERR,
+  BIC_ERR_TYPE_CNT,
+};
+
 /* Heartbeat configuration */
 static unsigned int hb_interval = 500;
 
@@ -201,6 +213,9 @@ static int regen_interval = 1200;
 static bool nm_monitor_enabled = false;
 static int nm_monitor_interval = DEFAULT_MONITOR_INTERVAL;
 static unsigned char nm_retry_threshold = 0;
+static bool nm_transmission_via_bic = false;
+static uint8_t is_duplicated_unaccess_event[MAX_NUM_FRUS] = {false};
+static uint8_t is_duplicated_abnormal_event[MAX_NUM_FRUS] = {false};
 
 /* Verified-boot state check */
 static bool vboot_state_check = false;
@@ -216,6 +231,9 @@ extern void * pfr_monitor();
 /* BIC health monitor */
 static bool bic_health_enabled = false;
 static uint8_t bic_fru = 0;
+
+/* healthd log rearm monitor */
+static bool log_rearm_enabled = false;
 
 static void
 initialize_threshold(const char *target, json_t *thres, struct threshold_s *t) {
@@ -511,6 +529,13 @@ initialize_nm_monitor_config(json_t *conf)
   {
     nm_retry_threshold = json_integer_value(tmp);
   }
+
+  tmp = json_object_get(conf, "nm_transmission_via_bic");
+  if (tmp && json_is_boolean(tmp))
+  {
+    nm_transmission_via_bic = json_is_true(tmp);
+  }
+
 #ifdef DEBUG
   syslog(LOG_WARNING, "enabled:%d, monitor_interval:%d, retry_threshold:%d", nm_monitor_enabled, nm_monitor_interval, nm_retry_threshold);
 #endif
@@ -580,6 +605,10 @@ initialize_configuration(void) {
   v = json_object_get(conf, "version");
   if (v && json_is_string(v)) {
     syslog(LOG_INFO, "Loaded configuration version: %s\n", json_string_value(v));
+  }
+  v = json_object_get(conf, "log_rearm");
+  if (v && json_is_boolean(v)) {
+    log_rearm_enabled = json_is_true(v);
   }
   initialize_hb_config(json_object_get(conf, "heartbeat"));
   initialize_cpu_config(json_object_get(conf, "bmc_cpu_utilization"));
@@ -735,6 +764,9 @@ initilize_all_kv() {
 
 static void *
 hb_handler() {
+  // set flag to notice BMC healthd hb_handler is ready
+  kv_set("flag_healthd_hb_led", "1", 0, 0);
+
   while(1) {
     /* Turn ON the HB Led*/
     pal_set_hb_led(1);
@@ -757,6 +789,9 @@ watchdog_handler() {
    * of this process's liveliness.
    */
   watchdog_disable_magic_close();
+
+  // set flag to notice BMC healthd watchdog_handler is ready
+  kv_set("flag_healthd_wtd", "1", 0, 0);
 
   while(1) {
 
@@ -879,6 +914,9 @@ CPU_usage_monitor() {
 
   memset(cpu_utilization, 0, sizeof(float) * cpu_window_size);
 
+  // set flag to notice BMC healthd CPU_usage_monitor is ready
+  kv_set("flag_healthd_cpu", "1", 0, 0);
+
   while (1) {
 
     if (retry > HEALTHD_MAX_RETRY) {
@@ -999,6 +1037,9 @@ memory_usage_monitor() {
     }
   }
 
+  // set flag to notice BMC healthd memory_usage_monitor is ready
+  kv_set("flag_healthd_mem", "1", 0, 0);
+
   while (1) {
 
     if (retry > HEALTHD_MAX_RETRY) {
@@ -1055,6 +1096,9 @@ ecc_mon_handler() {
   void *mcr58_addr;
   void *mcr5c_addr;
   int retry_err = 0;
+
+  // set flag to notice BMC healthd ecc_mon_handler is ready
+  kv_set("flag_healthd_ecc", "1", 0, 0);
 
   while (1) {
     mcr_fd = open("/dev/mem", O_RDWR | O_SYNC );
@@ -1151,8 +1195,6 @@ void check_nm_selftest_result(uint8_t fru, int result)
 {
   static uint8_t no_response_retry[MAX_NUM_FRUS] = {0};
   static uint8_t abnormal_status_retry[MAX_NUM_FRUS] = {0};
-  static uint8_t is_duplicated_unaccess_event[MAX_NUM_FRUS] = {false};
-  static uint8_t is_duplicated_abnormal_event[MAX_NUM_FRUS] = {false};
   char fru_name[10]={0};
   int fru_index = fru - 1;//fru id is start from 1.
 
@@ -1220,41 +1262,42 @@ void check_nm_selftest_result(uint8_t fru, int result)
   }
 }
 
+void
+nm_selftest(uint8_t fru) {
+  int ret = 0;
+  int result = 0;
+  const uint8_t normal_status[SIZE_SELF_TEST_RESULT] = {0x55, 0x00}; // If the selftest result is 55 00, the status of the controller is okay
+  uint8_t data[SIZE_SELF_TEST_RESULT] = {0x0};
+
+  if (pal_is_slot_server(fru) == 1) {
+    if (pal_is_fw_update_ongoing(fru) == true) {
+      return;
+    }
+
+    ret = pal_get_nm_selftest_result(fru, data);
+    if (PAL_EOK == ret) {
+      //if nm has the response, check the status
+      result = memcmp(data, normal_status, sizeof(normal_status));
+    } else {
+      //if nm has no response, suppose it is in the not support state
+      result = PAL_ENOTSUP;
+    }
+    check_nm_selftest_result(fru, result);
+  }
+}
+
+
 static void *
 nm_monitor()
 {
   int fru;
-  int ret;
-  int result;
-  const uint8_t normal_status[2] = {0x55, 0x00}; // If the selftest result is 55 00, the status of the controller is okay
-  uint8_t data[2]={0x0};
 
   while (1)
   {
     for ( fru = 1; fru <= MAX_NUM_FRUS; fru++)
     {
-      if ( pal_is_slot_server(fru) )
-      {
-        if ( pal_is_fw_update_ongoing(fru) )
-        {
-          continue;
-        }
-
-        ret = pal_get_nm_selftest_result(fru, data);
-        if ( PAL_EOK == ret )
-        {
-          //if nm has the response, check the status
-          result = memcmp(data, normal_status, sizeof(normal_status));
-        }
-        else
-        {
-          //if nm has no response, suppose it is in the not support state
-          result = PAL_ENOTSUP;
-        }
-        check_nm_selftest_result(fru, result);
-      }
+      nm_selftest(fru);
     }
-
     sleep(nm_monitor_interval);
   }
 
@@ -1303,6 +1346,9 @@ crit_proc_monitor() {
   bool is_fw_updating = false;
   bool is_crashdump_ongoing = false;
   bool is_cplddump_ongoing = false;
+
+  // set flag to notice BMC healthd crit_proc_monitor is ready
+  kv_set("flag_healthd_crit_proc", "1", 0, 0);
 
   while(1)
   {
@@ -1619,6 +1665,9 @@ timestamp_handler()
   ctime_r(&time_sled_off, buf);
   log_reboot_cause(buf);
 
+  // set flag to notice BMC healthd timestamp_handler is ready
+  kv_set("flag_healthd_bmc_timestamp", "1", 0, 0);
+
   while (1) {
 
     // Make sure the time is initialized properly
@@ -1665,8 +1714,18 @@ timestamp_handler()
 static void *
 bic_health_monitor() {
   int err_cnt = 0;
+  int i = 0;
   uint8_t status = 0;
+  uint8_t err_type[BIC_RESET_ERR_CNT] = {0};
+  uint8_t type = 0;
+  const char* err_str[BIC_ERR_TYPE_CNT] = {
+    "heartbeat", "IPMB", "BIC ready"
+  };
+  char err_log[MAX_LOG_SIZE] = "\0";
   bool is_already_reset = false;
+
+  // set flag to notice BMC healthd bic_health_monitor is ready
+  kv_set("flag_healthd_bic_health", "1", 0, 0);
 
   while (1) {
     if ((pal_get_server_12v_power(bic_fru, &status) < 0) || (status == SERVER_12V_OFF)) {
@@ -1675,31 +1734,42 @@ bic_health_monitor() {
 
     // Read BIC ready pin to check BIC boots up completely
     if ((pal_is_bic_ready(bic_fru, &status) < 0) || (status == false)) {
-      err_cnt++;
+      err_type[err_cnt++] = BIC_READY_ERR;
       goto next_run;
     }
 
     // Check whether BIC heartbeat works 
     if (pal_is_bic_heartbeat_ok(bic_fru) == false) {
-      err_cnt++;
+      err_type[err_cnt++] = BIC_HB_ERR;
       goto next_run;
     }
 
     // Send a IPMB command to check IPMB service works normal
     if (pal_bic_self_test() < 0) {
-      err_cnt++;
+      err_type[err_cnt++] = BIC_IPMB_ERR;
       goto next_run;
     }
-
     // if all check pass, clear error counter and reset flag
     err_cnt = 0;
     is_already_reset = false;
 
+    // The ME commands are transmit via BIC on Grand Canyon, so check ME health when BIC health is good.
+    if ((nm_monitor_enabled == true) && (nm_transmission_via_bic == true)) {
+      nm_selftest(bic_fru);
+    }
 next_run:
     if ((err_cnt >= BIC_RESET_ERR_CNT) && (is_already_reset == false)) {
       // if error counter over 3, reset BIC by hardware
       if (pal_bic_hw_reset() == 0) {
-        syslog(LOG_CRIT, "FRU %d BIC reset by BIC health monitor", bic_fru);
+        for (i = 0; i < BIC_RESET_ERR_CNT; i++) {
+          type = err_type[i];
+          strcat(err_log, err_str[type]);
+          if (i != BIC_RESET_ERR_CNT - 1) { // last one
+            strcat(err_log, ", ");
+          }          
+        }
+        syslog(LOG_CRIT, "FRU %d BIC reset by BIC health monitor due to health check failed in following order: %s", 
+                bic_fru, err_log);
         err_cnt = 0;
         is_already_reset = true;
       }
@@ -1707,6 +1777,33 @@ next_run:
     sleep(BIC_HEALTH_INTERVAL);
   }
 
+  return NULL;
+}
+
+static void *
+log_rearm_check() {
+  int ret = 0;
+  char val[MAX_KEY_LEN] = {0};
+
+  while (1) {
+    ret = kv_get(KV_KEY_HEALTHD_REARM, val, NULL, 0);
+    if (ret < 0) {
+      sleep(LOG_REARM_CHECK_INTERVAL);
+      continue;
+    }
+    if (strcmp(val, "1") == 0) {
+      if (nm_monitor_enabled == true) {        
+        memset(is_duplicated_unaccess_event, 0, sizeof(is_duplicated_unaccess_event));
+        memset(is_duplicated_abnormal_event, 0, sizeof(is_duplicated_abnormal_event));
+      }
+      if (vboot_state_check && vboot_supported()) {
+        check_vboot_state();
+      }
+      kv_set(KV_KEY_HEALTHD_REARM, "0", 0, 0);
+    }
+    sleep(LOG_REARM_CHECK_INTERVAL);
+  }
+  
   return NULL;
 }
 
@@ -1730,6 +1827,7 @@ main(int argc, char **argv) {
   pthread_t tid_pfr_monitor;
   pthread_t tid_timestamp_handler;
   pthread_t tid_bic_health_monitor;
+  pthread_t tid_log_rearm_check;
 
   if (argc > 1) {
     exit(1);
@@ -1800,7 +1898,7 @@ main(int argc, char **argv) {
     }
   }
 
-  if (nm_monitor_enabled) {
+  if ((nm_monitor_enabled == true) && (nm_transmission_via_bic == false)) {
     if (pthread_create(&tid_nm_monitor, NULL, nm_monitor, NULL)) {
       syslog(LOG_WARNING, "pthread_create for nm monitor error\n");
       exit(1);
@@ -1832,7 +1930,10 @@ main(int argc, char **argv) {
       exit(1);
     }
   }
-
+  if (pthread_create(&tid_log_rearm_check, NULL, log_rearm_check, NULL)) {
+    syslog(LOG_WARNING, "pthread_create for log re-arm monitor error\n");
+    exit(1);
+  }
 
   pthread_join(tid_watchdog, NULL);
 
@@ -1857,7 +1958,7 @@ main(int argc, char **argv) {
     pthread_join(tid_bmc_health_monitor, NULL);
   }
 
-  if (nm_monitor_enabled) {
+  if ((nm_monitor_enabled == true) && (nm_transmission_via_bic == false)) {
     pthread_join(tid_nm_monitor, NULL);
   }
 
@@ -1874,6 +1975,10 @@ main(int argc, char **argv) {
   if (bic_health_enabled) {
     pthread_join(tid_bic_health_monitor, NULL);
   }
+
+  if (log_rearm_enabled){
+    pthread_join(tid_log_rearm_check, NULL);
+  }  
 
   return 0;
 }

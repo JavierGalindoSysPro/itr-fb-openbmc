@@ -97,7 +97,8 @@ KNOWN_USAGE_STRINGS = {
     "chattr": [
         "chattr [-R] [-+=AacDdijsStTu] [-v VERSION] [FILE]...",
         "chattr [-pRVf] [-+=aAcCdDeijPsStTu] [-v version] files...",  # BusyBox 1.30.1
-        "chattr [-pRVf] [-+=aAcCdDeijPsStTuF] [-v version] files...", # BusyBox 1.31.0
+        "chattr [-pRVf] [-+=aAcCdDeijPsStTuF] [-v version] files...",  # BusyBox 1.31.0
+        "chattr [-R] [-v VERSION] [-+=AacDdijsStTu] FILE...",  # BusyBox 1.31.1
     ],
     "chgrp": ["chgrp [-RhLHP]... GROUP FILE..."],
     "chmod": ["chmod [-R] MODE[,MODE]... FILE..."],
@@ -201,7 +202,10 @@ KNOWN_USAGE_STRINGS = {
         "mknod [-m MODE] NAME TYPE MAJOR MINOR",
         "mknod [-m MODE] NAME TYPE [MAJOR MINOR]",  # BusyBox 1.30.1
     ],
-    "mktemp": ["mktemp [-dt] [-p DIR] [TEMPLATE]"],
+    "mktemp": [
+        "mktemp [-dt] [-p DIR] [TEMPLATE]",
+        "mktemp [-dt] [-p DIR, --tmpdir[=DIR]] [TEMPLATE]",  # BusyBox 1.31.1
+    ],
     "more": [
         "more [FILE]...",  # noqa: B950
         "more [options] <file>...",  # BusyBox 1.30.1
@@ -234,6 +238,7 @@ KNOWN_USAGE_STRINGS = {
         "renice [-n] <priority> [-p|--pid] <pid>...",  # BusyBox 1.30.1
         "renice [-n] <priority>  -g|--pgrp <pgid>...",  # BusyBox 1.30.1
         "renice [-n] <priority>  -u|--user <user>...",  # BusyBox 1.30.1
+        "renice [-n] PRIORITY [[-p | -g | -u] ID...]...",  # BusyBox 1.31.1
     ],
     "reset": ["reset"],
     "resize": ["resize"],
@@ -244,7 +249,10 @@ KNOWN_USAGE_STRINGS = {
     ],
     "runsv": ["runsv DIR"],
     "runsvdir": ["runsvdir [-P] [-s SCRIPT] DIR"],
-    "rx": ["rx FILE"],
+    "rx": [
+        "rx FILE",
+        "rx [options] [filename.if.xmodem]",  # rx version 0.12.20
+    ],
     "sed": [
         "sed [-inrE] [-f FILE]... [-e CMD]... [FILE]...",  # noqa: B950
         "sed [-i[SFX]] [-nrE] [-f FILE]... [-e CMD]... [FILE]...",  # BusyBox 1.30.1
@@ -287,7 +295,7 @@ KNOWN_USAGE_STRINGS = {
     ],
     "top": [
         "top [-b] [-nCOUNT] [-dSECONDS]",
-        "top [-b] [-n COUNT] [-d SECONDS]", # BusyBox 1.31.0
+        "top [-b] [-n COUNT] [-d SECONDS]",  # BusyBox 1.31.0
     ],
     "touch": ["touch [-c] [-d DATE] [-t DATE] [-r FILE] FILE..."],
     "tr": ["tr [-cds] STRING1 [STRING2]"],
@@ -315,7 +323,7 @@ KNOWN_USAGE_STRINGS = {
     "watch": ["watch [-n SEC] [-t] PROG ARGS"],
     "wc": [
         "wc [-clwL] [FILE]...",
-        "wc [-cmlwL] [FILE]...", # BusyBox 1.31.0
+        "wc [-cmlwL] [FILE]...",  # BusyBox 1.31.0
     ],
     "wget": [
         "wget [-c|--continue] [-s|--spider] [-q|--quiet] [-O|--output-document FILE]",  # noqa: B950

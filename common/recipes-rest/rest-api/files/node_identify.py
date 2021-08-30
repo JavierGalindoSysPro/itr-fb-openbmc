@@ -2,10 +2,12 @@
 
 from subprocess import *
 
+from common_utils import async_exec
 from kv import FPERSIST, kv_get
 from node import node
 from rest_pal_legacy import *
 
+identify_name = {"FBTTN": "identify_slot1", "Grand Canyon": "system_identify_server"}
 
 
 class identifyNode(node):
@@ -21,24 +23,30 @@ class identifyNode(node):
         else:
             self.actions = actions
 
-    def getInformation(self, param={}):
-        identify_status = kv_get("identify_slot1", FPERSIST)
+    async def getInformation(self, param={}):
+        # Get Platform Name
+        plat_name = pal_get_platform_name()
+
+        if plat_name in identify_name:
+            identify_status = kv_get(identify_name[plat_name], FPERSIST)
+        else:
+            identify_status = kv_get("identify_slot1", FPERSIST)
         info = {"Status of identify LED": identify_status}
 
         return info
 
-    def doAction(self, data, param={}):
+    async def doAction(self, data, param={}):
         if data["action"] == "on":
             cmd = "/usr/bin/fpc-util --identify on"
-            data = Popen(cmd, shell=True, stdout=PIPE).stdout.read().decode()
-            if data.startswith("Usage"):
+            _, stdout, _ = await async_exec(cmd, shell=True)
+            if stdout.startswith("Usage"):
                 res = "failure"
             else:
                 res = "success"
         elif data["action"] == "off":
             cmd = "/usr/bin/fpc-util --identify off"
-            data = Popen(cmd, shell=True, stdout=PIPE).stdout.read().decode()
-            if data.startswith("Usage"):
+            _, stdout, _ = await async_exec(cmd, shell=True)
+            if stdout.startswith("Usage"):
                 res = "failure"
             else:
                 res = "success"

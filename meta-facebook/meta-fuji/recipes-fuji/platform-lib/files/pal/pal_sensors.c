@@ -75,8 +75,8 @@ typedef struct {
   char name[NAME_MAX];
 } sensor_path_t;
 
-static sensor_desc_t m_snr_desc[MAX_NUM_FRUS][MAX_SENSOR_NUM] = {0};
-static sensor_path_t snr_path[MAX_NUM_FRUS][MAX_SENSOR_NUM] = {0};
+static sensor_desc_t m_snr_desc[MAX_NUM_FRUS][MAX_SENSOR_NUM + 1] = {0};
+static sensor_path_t snr_path[MAX_NUM_FRUS][MAX_SENSOR_NUM + 1] = {0};
 static uint8_t sdr_fru_update_flag[MAX_NUM_FRUS] = {0};
 static bool init_threshold_done[MAX_NUM_FRUS+1] = {false};
 
@@ -776,10 +776,10 @@ const uint8_t psu4_sensor_list[] = {
   PSU4_SENSOR_TEMP3,
 };
 
-float scm_sensor_threshold[MAX_SENSOR_NUM][MAX_SENSOR_THRESHOLD + 1] = {0};
-float smb_sensor_threshold[MAX_SENSOR_NUM][MAX_SENSOR_THRESHOLD + 1] = {0};
-float pim_sensor_threshold[MAX_SENSOR_NUM][MAX_SENSOR_THRESHOLD + 1] = {0};
-float psu_sensor_threshold[MAX_SENSOR_NUM][MAX_SENSOR_THRESHOLD + 1] = {0};
+float scm_sensor_threshold[MAX_SENSOR_NUM + 1][MAX_SENSOR_THRESHOLD + 1] = {0};
+float smb_sensor_threshold[MAX_SENSOR_NUM + 1][MAX_SENSOR_THRESHOLD + 1] = {0};
+float pim_sensor_threshold[MAX_SENSOR_NUM + 1][MAX_SENSOR_THRESHOLD + 1] = {0};
+float psu_sensor_threshold[MAX_SENSOR_NUM + 1][MAX_SENSOR_THRESHOLD + 1] = {0};
 
 size_t bic_discrete_cnt = sizeof(bic_discrete_list)/sizeof(uint8_t);
 size_t scm_sensor_cnt = sizeof(scm_sensor_list)/sizeof(uint8_t);
@@ -3947,10 +3947,6 @@ scm_thresh_done:
       smb_sensor_threshold[SMB_XP1R2][UNC_THRESH] = 1.23;
       smb_sensor_threshold[SMB_XP1R2][LNC_THRESH] = 1.17;
       smb_sensor_threshold[SMB_XP1R2][LCR_THRESH] = 1.02;
-      smb_sensor_threshold[SMB_VDDC_SW][UCR_THRESH] = 1;
-      smb_sensor_threshold[SMB_VDDC_SW][UNC_THRESH] = 0.98;
-      smb_sensor_threshold[SMB_VDDC_SW][LNC_THRESH] = 0.72;
-      smb_sensor_threshold[SMB_VDDC_SW][LCR_THRESH] = 0.69;
       smb_sensor_threshold[SMB_XP3R3V][UCR_THRESH] = 3.8;
       smb_sensor_threshold[SMB_XP3R3V][UNC_THRESH] = 3.465;
       smb_sensor_threshold[SMB_XP3R3V][LNC_THRESH] = 3.165;
@@ -3963,14 +3959,6 @@ scm_thresh_done:
       smb_sensor_threshold[SMB_XP1R2V_TVDD][UNC_THRESH] = 1.236;
       smb_sensor_threshold[SMB_XP1R2V_TVDD][LNC_THRESH] = 1.164;
       smb_sensor_threshold[SMB_XP1R2V_TVDD][LCR_THRESH] = 1.02;
-      smb_sensor_threshold[SMB_XP0R75V_1_PVDD][UCR_THRESH] = 0.862;
-      smb_sensor_threshold[SMB_XP0R75V_1_PVDD][UNC_THRESH] = 0.81;
-      smb_sensor_threshold[SMB_XP0R75V_1_PVDD][LNC_THRESH] = 0.728;
-      smb_sensor_threshold[SMB_XP0R75V_1_PVDD][LCR_THRESH] = 0.638;
-      smb_sensor_threshold[SMB_XP0R75V_2_PVDD][UCR_THRESH] = 0.862;
-      smb_sensor_threshold[SMB_XP0R75V_2_PVDD][UNC_THRESH] = 0.81;
-      smb_sensor_threshold[SMB_XP0R75V_2_PVDD][LNC_THRESH] = 0.728;
-      smb_sensor_threshold[SMB_XP0R75V_2_PVDD][LCR_THRESH] = 0.638;
       smb_sensor_threshold[SMB_XP0R75V_3_PVDD][UCR_THRESH] = 0.862;
       smb_sensor_threshold[SMB_XP0R75V_3_PVDD][UNC_THRESH] = 0.81;
       smb_sensor_threshold[SMB_XP0R75V_3_PVDD][LNC_THRESH] = 0.728;
@@ -3984,7 +3972,7 @@ scm_thresh_done:
       smb_sensor_threshold[SMB_XP0R84V_DCSU][LNC_THRESH] = 0.819;
       smb_sensor_threshold[SMB_XP0R84V_DCSU][LCR_THRESH] = 0.714;
       smb_sensor_threshold[SMB_XP0R84V_CSU][UCR_THRESH] = 0.966;
-      smb_sensor_threshold[SMB_XP0R84V_CSU][UNC_THRESH] = 0.861;
+      smb_sensor_threshold[SMB_XP0R84V_CSU][UNC_THRESH] = 0.924;
       smb_sensor_threshold[SMB_XP0R84V_CSU][LNC_THRESH] = 0.819;
       smb_sensor_threshold[SMB_XP0R84V_CSU][LCR_THRESH] = 0.714;
       smb_sensor_threshold[SMB_XP1R84V_CSU][UCR_THRESH] = 2.07;

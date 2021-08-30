@@ -23,6 +23,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <openssl/md5.h>
 #include <openbmc/ipmi.h>
 
 #ifdef __cplusplus
@@ -92,6 +93,44 @@ extern "C" {
 #define SOCK_PATH_JTAG_MSG "/tmp/jtag_msg_socket_1"
 
 #define BOARD_ID_PIN_NUM 3
+
+// For IOC Daemon
+#define SOCK_PATH_IOC      "ioc_socket_%d"
+#define MAX_SOCK_PATH_SIZE (64)
+
+#define IOC_FW_VER_SIZE    (8)
+#define TIMEOUT_IOC        (5) //Unit: second
+
+#define MAX_POSTCODE_LEN    256
+#define POST_CODE_FILE      "/tmp/post_code_buffer.bin"
+#define LAST_POST_CODE_FILE "/tmp/last_post_code_buffer.bin"
+
+
+#define SKU_UIC_ID_SIZE    2
+#define SKU_UIC_TYPE_SIZE  4
+#define SKU_SIZE           (SKU_UIC_ID_SIZE + SKU_UIC_TYPE_SIZE)
+#define MAX_SKU_VALUE      (1 << SKU_SIZE)
+#define SYSTEM_INFO        "system_info"
+
+#define MD5_READ_BYTES     (1024)
+
+#define PLAT_SIG_SIZE      (16)
+//The delay of power control
+#define DELAY_DC_POWER_CYCLE 5
+#define DELAY_DC_POWER_OFF 6
+#define DELAY_GRACEFUL_SHUTDOWN 1
+#define DELAY_DC_POWER_ON 1
+#define DELAY_RESET 1
+
+#define PWR_CTRL_ACT_CNT 3
+
+#define MAX_RETRY        (3)
+
+#define BS_FPGA_BOARD_REV_ID_OFFSET (0x07)
+
+#define UIC_FPGA_UART_BRIDGING_OFFSET (0x13)
+
+extern const char *board_stage[];
 
 enum {
   FRU_ALL = 0,
@@ -167,6 +206,12 @@ enum {
   STAGE_MP
 };
 
+enum {
+  DEV_ID0_E1S = 0x1,
+  DEV_ID1_E1S = 0x2,
+  MAX_NUM_DEVS,
+};
+
 typedef struct {
   unsigned char netfn_lun;
   unsigned char cmd;
@@ -182,6 +227,11 @@ typedef struct {
   uint8_t data[];
 } me_xmit_res;
 
+typedef struct _platformInformation {
+  char uicId[SKU_UIC_ID_SIZE];
+  char uicType[SKU_UIC_TYPE_SIZE];
+} platformInformation;
+
 int fbgc_common_get_chassis_type(uint8_t *type);
 void msleep(int msec);
 int fbgc_common_server_stby_pwr_sts(uint8_t *val);
@@ -191,6 +241,10 @@ int string_2_byte(const char* c);
 bool start_with(const char *s, const char *p);
 int split(char **dst, char *src, char *delim, int max_size);
 int fbgc_common_get_system_stage(uint8_t *stage);
+int check_image_md5(const char* image_path, int cal_size, uint32_t md5_offset);
+int check_image_signature(const char* image_path, uint32_t sig_offset);
+int get_server_board_revision_id(uint8_t* board_rev_id, uint8_t board_rev_id_len);
+int fbgc_common_dev_id(char *str, uint8_t *dev);
 
 #ifdef __cplusplus
 } // extern "C"

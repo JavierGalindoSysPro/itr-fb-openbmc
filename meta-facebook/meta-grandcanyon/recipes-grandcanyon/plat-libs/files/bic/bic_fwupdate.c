@@ -297,7 +297,7 @@ send_bic_image_data(int i2cfd, uint16_t len, uint8_t *buf) {
 static int
 send_bic_runtime_image_data(int fd, int i2cfd, int file_size, const uint8_t bytes_per_read) {
   uint8_t buf[BIC_IMG_DATA_LEN] = {0};
-  uint8_t read_bytes = 0;
+  uint8_t read_bytes = 0, max_read_bytes = 0;
   int ret = -1;
   int dsize = 0;
   int last_offset = 0;
@@ -313,7 +313,12 @@ send_bic_runtime_image_data(int fd, int i2cfd, int file_size, const uint8_t byte
 
   while (1) {
     memset(buf, 0, sizeof(buf));
-    read_bytes = read(fd, buf, bytes_per_read);
+    max_read_bytes = bytes_per_read;
+    if ((offset + bytes_per_read) > file_size) {
+      // Prevent to read the MD5 bytes.
+      max_read_bytes = file_size - offset;
+    }
+    read_bytes = read(fd, buf, max_read_bytes);
     if ( read_bytes <= 0 ) {
       //no more bytes can be read
       break;
@@ -554,34 +559,42 @@ exit:
 }
 
 static int
-is_valid_bic_image(uint8_t comp, int fd, int file_size){
+is_valid_bic_image(uint8_t comp, int fd, int file_size, char* path){
 #define BICBL_TAG 0x00
 #define BICBR_TAG 0x01
 #define BICBL_OFFSET 0x3f00
 #define BICBR_OFFSET 0x8000
+#define BICBL_PLAT_SIG_OFFSET 0x3ef0
+#define BICBR_PLAT_SIG_OFFSET 0x7ff0
 
 #define REVISION_ID(x) ((x >> 4) & 0x0f)
 #define COMPONENT_ID(x) (x & 0x0f)
 
-  int ret = BIC_STATUS_FAILURE;
+  int ret = BIC_STATUS_FAILURE, board_type_index = 0;
   uint8_t rbuf[BIC_VALIDATE_READ_LEN] = {0};
   uint8_t rlen = sizeof(rbuf);
-  uint8_t sel_tag = 0xff;
+  uint8_t sel_tag = 0xff, fw_rev_id = 0xff, board_rev_id = 0xff;
   uint32_t sel_offset = 0xffffffff;
- 
+  uint32_t sig_offset = 0xffffffff;
+  uint32_t md5_offset = 0xffffffff;
+  bool board_rev_is_invalid = false;
+
   switch (comp) {
     case UPDATE_BIC:
       sel_tag = BICBR_TAG;
       sel_offset = BICBR_OFFSET;
+      sig_offset = BICBR_PLAT_SIG_OFFSET;
       break;
     case UPDATE_BIC_BOOTLOADER:
       sel_tag = BICBL_TAG;
       sel_offset = BICBL_OFFSET;
+      sig_offset = BICBL_PLAT_SIG_OFFSET;
       break;
     default:
       syslog(LOG_WARNING, "%s() Unknown component %x", __func__, comp);
       break;
   }
+  md5_offset = file_size;
 
   if (lseek(fd, sel_offset, SEEK_SET) != (off_t)sel_offset) {
     goto error_exit;
@@ -594,6 +607,53 @@ is_valid_bic_image(uint8_t comp, int fd, int file_size){
   if ( rbuf[0] != sel_tag || COMPONENT_ID(rbuf[1]) != COMPONENT_ID(BIC_BS) ) {
     goto error_exit;
   }
+
+  // Check f/w and server board stage
+  if (get_server_board_revision_id(&board_rev_id, sizeof(board_rev_id)) < 0) {
+    goto error_exit;
+  }
+
+  fw_rev_id = REVISION_ID(rbuf[1]);
+  board_type_index = board_rev_id - 1;
+  if (board_type_index < 0) {
+    board_type_index = 0;
+  }
+
+  if ((fw_rev_id > STAGE_MP) || (board_type_index > STAGE_MP)) {
+    syslog(LOG_WARNING, "%s() wrong board revision ID, f/w REV ID: %d, board REV ID: %d", __func__, fw_rev_id, board_type_index);
+    goto error_exit;
+  }
+
+  // PVT & MP firmware could be used in common
+  if (board_type_index < STAGE_PVT) {
+    if (fw_rev_id != board_type_index) {
+      board_rev_is_invalid = true;
+    }
+  } else {
+    if (fw_rev_id < STAGE_PVT) {
+      board_rev_is_invalid = true;
+    }
+  }
+
+  if (board_rev_is_invalid == true) {
+    printf("If you want to update the %s f/w on the %s system, please use force update.\n",
+            board_stage[fw_rev_id], board_stage[board_type_index]);
+    goto error_exit;
+  }
+
+  // Compare MD5 of image
+  if (check_image_md5(path, file_size, md5_offset) < 0) {
+    printf("Image file has corrupted!\n");
+    printf("If you are updating with old version firmware, please use force update.\n");
+    goto error_exit;
+  }
+
+  // Compare signature of image
+  if (check_image_signature(path, sig_offset) < 0) {
+    printf("The image is not for Grand Canyon!\n");
+    goto error_exit;
+  }
+
   ret = BIC_STATUS_SUCCESS;
 
 error_exit:
@@ -616,14 +676,25 @@ update_bic_runtime_fw(uint8_t comp, char *path, uint8_t force) {
     syslog(LOG_WARNING, "%s() cannot open the file: %s, fd = %d\n", __func__, path, fd);
     goto exit;
   }
-  printf("file size = %d bytes\n", file_size);
 
   //check the content of the image
-  if (!force && is_valid_bic_image(comp, fd, file_size)) {
-    printf("Invalid BIC file!\n");
-    ret = -1;
-    goto exit;
+  if (force == 0) {
+    // minus 16 bytes of md5
+    file_size -= MD5_DIGEST_LENGTH;
+
+    if (is_valid_bic_image(comp, fd, file_size, path) < 0) {
+      printf("Invalid BIC file!\n");
+      ret = -1;
+      goto exit;
+    }
+  } else {
+    // If image contains MD5 bytes, minus 16 bytes of MD5
+    if (check_image_md5(path, (file_size - MD5_DIGEST_LENGTH), (file_size - MD5_DIGEST_LENGTH)) >= 0) {
+      file_size -= MD5_DIGEST_LENGTH;
+    }
   }
+  printf("file size = %d bytes\n", file_size);
+
   ret = update_bic(fd, file_size, force);
 
 exit:
@@ -639,7 +710,7 @@ update_fw_bic_bootloader(uint8_t comp, int fd, int file_size) {
   const uint8_t bytes_per_read = IPMB_MAX_SEND;
   uint8_t buf[BIC_IMG_DATA_LEN] = {0};
   uint16_t buf_size = sizeof(buf);
-  uint16_t read_bytes = 0;
+  uint16_t read_bytes = 0, max_read_bytes = 0;
   uint32_t offset = 0;
   uint32_t last_offset = 0;
   uint32_t dsize = 0;
@@ -655,7 +726,13 @@ update_fw_bic_bootloader(uint8_t comp, int fd, int file_size) {
   printf("Update BIC bootloader\n");
   while (1) {
     memset(buf, 0, buf_size);
-    read_bytes = read(fd, buf, bytes_per_read);
+    max_read_bytes = bytes_per_read;
+    if ((offset + max_read_bytes > file_size)) {
+      // Prevent to read the MD5 bytes.
+      max_read_bytes = file_size - offset;
+    }
+
+    read_bytes = read(fd, buf, max_read_bytes);
     if ( read_bytes <= 0 ) {
       //no more bytes can be read
       break;
@@ -690,14 +767,24 @@ update_bic_bootloader_fw(uint8_t comp, char *path, uint8_t force) {
     syslog(LOG_WARNING, "%s() cannot open the file: %s, fd=%d", __func__, path, fd);
     goto exit;
   }
-  printf("file size = %d bytes, comp = 0x%x\n", file_size, comp);
 
   //check the content of the image
-  ret = is_valid_bic_image(comp, fd, file_size);
-  if (ret < 0) {
-    printf("Invalid BIC bootloader file!\n");
-    goto exit;
+  if (force == 0) {
+    // minus 16 bytes of md5
+    file_size -= MD5_DIGEST_LENGTH;
+
+    if (is_valid_bic_image(comp, fd, file_size, path) < 0) {
+      printf("Invalid BIC bootloader file!\n");
+      ret = -1;
+      goto exit;
+    }
+  } else {
+    // If image contains MD5 bytes, minus 16 bytes of MD5.
+    if (check_image_md5(path, (file_size - MD5_DIGEST_LENGTH), (file_size - MD5_DIGEST_LENGTH)) >= 0) {
+      file_size -= MD5_DIGEST_LENGTH;
+    }
   }
+  printf("file size = %d bytes, comp = 0x%x\n", file_size, comp);
 
   ret = update_fw_bic_bootloader(comp, fd, file_size);
 

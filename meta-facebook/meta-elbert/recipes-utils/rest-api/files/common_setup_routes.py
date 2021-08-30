@@ -17,10 +17,12 @@
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
 #
-from common_endpoint import commonApp_Handler
-from rest_utils import *
-
+from aiohttp.log import server_logger
 from aiohttp.web import Application
+from common_endpoint import commonApp_Handler
+from redfish_common_routes import Redfish
+from rest_utils import common_routes
+
 
 def setup_common_routes(app: Application, write_enabled: bool):
     chandler = commonApp_Handler()
@@ -36,5 +38,7 @@ def setup_common_routes(app: Application, write_enabled: bool):
     app.router.add_get(common_routes[8], chandler.rest_fcpresent_hdl)
     app.router.add_get(common_routes[9], chandler.psu_update_hdl)
     app.router.add_post(common_routes[9], chandler.psu_update_hdl_post)
-    app.router.add_get(common_routes[10], chandler.rest_slotid_hdl)
-    app.router.add_get(common_routes[11], chandler.rest_mTerm_status)
+    server_logger.info("Adding Redfish common routes")
+    redfish = Redfish()
+    redfish.setup_redfish_common_routes(app)
+    redfish.setup_multisled_routes(app)

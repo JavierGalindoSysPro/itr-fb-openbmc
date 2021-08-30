@@ -21,12 +21,13 @@
 # This script is for dumping debug information on elbert
 
 import argparse
+import os
 import string
 import subprocess
 import time
 
 
-VERSION = "0.6"
+VERSION = "0.8"
 SC_POWERGOOD = "/sys/bus/i2c/drivers/scmcpld/12-0043/switchcard_powergood"
 
 
@@ -185,6 +186,11 @@ def logDump():
             runCmd("cat /var/log/boot", echo=True)
         )
     )
+    print(
+        "#### LINUX MESSAGES LOG ####\n{}\n\n".format(
+            runCmd("cat /var/log/messages", echo=True)
+        )
+    )
     print("################################")
     print("########## HOST (uServer) CPU LOGS ##########")
     print("################################\n")
@@ -197,11 +203,10 @@ def logDump():
     print("################################")
     print("##########  DPM LOGS  ##########")
     print("################################\n")
-    print(
-        "#### DPM LOG ####\n{}\n".format(
-            runCmd("cat /mnt/data1/log/dpm_log", echo=True),
-        )
-    )
+    print("#### DPM LOG ####")
+    if os.path.exists("/mnt/data1/log/dpm_log.1"):
+        print("{}\n".format(runCmd("cat /mnt/data1/log/dpm_log.1", echo=True)))
+    print("{}\n".format(runCmd("cat /mnt/data1/log/dpm_log", echo=True)))
 
 
 def i2cDetectDump():
@@ -283,6 +288,11 @@ def showtech(verboseLevel=0):
     print(
         "##### PIM TYPES #####\n{}".format(
             runCmd("/usr/local/bin/pim_types.sh", verbose=True)
+        )
+    )
+    print(
+        "##### TH4 CONFIGURATION #####\n{}".format(
+            runCmd("/usr/local/bin/th4_qspi_ver.sh", verbose=True)
         )
     )
 

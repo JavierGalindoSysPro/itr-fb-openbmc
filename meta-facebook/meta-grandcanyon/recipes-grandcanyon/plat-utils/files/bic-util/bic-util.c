@@ -31,6 +31,7 @@
 #include <facebook/bic.h>
 #include <openbmc/ipmi.h>
 #include <openbmc/pal.h>
+#include <openbmc/pal_power.h>
 #include <facebook/fbgc_common.h>
 #include <facebook/fbgc_gpio.h>
 #include <sys/time.h>
@@ -38,6 +39,7 @@
 
 #define MAX_FILE_CMD_BUF     1024
 #define MAX_USB_TRANSFER_LEN 64
+#define BIC_SERVER_FRUID     0x0
 #define BIT_VALUE(list, index) \
            ((((uint8_t*)&list)[index/8]) >> (index % 8)) & 0x1\
 
@@ -56,6 +58,9 @@ static const char *option_list[] = {
   "--clear_cmos",
   "--file [path]",
   "--check_usb_port",
+  "--get_config",
+  "--read_fruid",
+  "--get_sel",
 };
 
 static void
@@ -523,8 +528,22 @@ util_bic_clear_cmos() {
     printf("Clear CMOS via bic-util is not supported for system before DVT, please use bios-util instead\n");
     goto out;
   }
+  /* clear CMOS will restore BS to default config and auto power on BS */
+  if (pal_host_power_on_pre_actions() < 0) {
+    printf("Power on pre-actions failed\n");
+    goto out;
+  }
   ret = bic_clear_cmos();
   printf("Performing CMOS clear, status %d\n", ret);
+
+  if (ret == 0) {
+    if (pal_check_server_power_change_correct(SET_DC_POWER_ON) == 0) {
+      pal_host_power_on_post_actions();
+    }
+  } else {
+    pal_restore_host_power_on_pre_actions();
+  }
+
   ret = pal_set_nic_perst(NIC_PE_RST_HIGH);
   if (ret < 0) {
     printf("Failed to set nic card PERST high\n");
@@ -730,6 +749,98 @@ util_check_usb_port() {
   return ret;
 }
 
+static int
+util_get_config() {
+  int ret = 0;
+  bic_config_t config = {0};
+  bic_config_u *t = (bic_config_u *) &config;
+
+  ret = bic_get_config(&config);
+  if (ret != 0) {
+    printf("util_get_config: bic_get_config failed\n");
+    return -1;
+  }
+
+  printf("SoL Enabled:  %s\n", t->bits.sol ? "Enabled" : "Disabled");
+  printf("POST Enabled: %s\n", t->bits.post ? "Enabled" : "Disabled");
+  printf("KCS Enabled: %s\n", t->bits.kcs ? "Enabled" : "Disabled");
+  printf("IPMB Enabled: %s\n", t->bits.ipmb ? "Enabled" : "Disabled");
+
+  return 0;
+}
+
+static int
+util_read_fruid(uint8_t fru_id) {
+  int ret = 0;
+  int fru_size = 0;
+  char path[MAX_PATH_LEN] = {0};
+
+  if (pal_get_fruid_path(FRU_SERVER, path) != 0) {
+    printf("Fail to get fruid path of server\n");
+    return -1;
+  }
+  ret = bic_read_fruid(fru_id, path, &fru_size);
+  if (ret != 0) {
+    printf("util_read_fruid: bic_read_fruid returns %d, fru_size: %d\n", ret, fru_size);
+    return -1;
+  }
+  printf("Read FRU success, FRU size is %d. The FRU binary file store in %s\n", fru_size, path);
+
+  return 0;
+}
+
+static int
+util_get_sel() {
+  int ret = 0;
+  int i = 0;
+  uint8_t rlen = 0;
+  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
+  ipmi_sel_sdr_info_t info = {0};
+  ipmi_sel_sdr_req_t req = {0};
+  ipmi_sel_sdr_res_t *res = (ipmi_sel_sdr_res_t *) rbuf;
+
+  req.rsv_id = 0;
+  req.rec_id = 1;
+  req.offset = 0;
+  req.nbytes = BYTES_ENTIRE_RECORD;
+
+  ret = bic_get_sdr_info(&info);
+  if (ret != 0) {
+    printf("Cannot get SEL information\n");
+    return -1;
+  }
+  if (info.rec_count == 0) {
+    printf("SEL is empty!\n");
+    return 0;
+  }
+  while (1) {
+    ret = bic_get_sel(&req, res, &rlen);
+    if (ret) {
+      printf("bic_get_sel() returns %d\n", ret);
+      break;
+    }
+
+    printf("SEL for record ID: %d\n", req.rec_id);
+    if (res->next_rec_id != LAST_RECORD_ID) {
+      printf("Next Record ID: %d\n", res->next_rec_id);
+    }    
+    printf("Record contents:\n");
+    for (i = 0;  i < rlen - 2; i++) { // First 2 bytes are next_rec_id
+      printf("0x%X:", res->data[i]);
+    }
+    printf("\n");
+
+    req.rec_id = res->next_rec_id;
+    if (req.rec_id == LAST_RECORD_ID) {
+      printf("This is LAST record\n");
+      break;
+    }
+    printf("\n");
+  }
+
+  return 0;
+}
+
 int
 main(int argc, char **argv) {
   uint8_t status = 0;
@@ -804,6 +915,12 @@ main(int argc, char **argv) {
         goto err_exit;
       }
       return util_check_usb_port();
+    } else if (strcmp(argv[2], "--get_config") == 0) {
+      return util_get_config();
+    } else if (strcmp(argv[2], "--read_fruid") == 0) {
+      return util_read_fruid(BIC_SERVER_FRUID);
+    } else if(strcmp(argv[2], "--get_sel") == 0) {
+      return util_get_sel();
     } else {
       printf("Invalid option: %s\n", argv[2]);
       goto err_exit;

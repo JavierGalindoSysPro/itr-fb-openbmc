@@ -33,23 +33,38 @@
 #include <openbmc/libgpio.h>
 #include <openbmc/pal.h>
 #include <openbmc/pal_sensors.h>
+#include <openbmc/kv.h>
 #include <facebook/fbgc_gpio.h>
 
 #define MONITOR_FRUS_PRESENT_STATUS_INTERVAL    60 // seconds
 #define MONITOR_SERVER_POWER_STATUS_INTERVAL    1  // seconds
 #define MONITOR_SCC_STBY_POWER_INTERVAL         1  // seconds
 
-#define E1S_IOCM_SLOT_NUM 2
-
 static void
 e1s_iocm_remove_event(int e1s_iocm_slot_id, uint8_t *present_status, uint8_t *gpio_power_good_pin) {
+  char cmd[MAX_PATH_LEN] = {0};
+  uint8_t chassis_type = 0;
 
   if ((present_status == NULL) || (gpio_power_good_pin == NULL)) {
     syslog(LOG_ERR, "%s() Failed to disable E1.S %d/IOCM I2C because the parameter is NULL\n", __func__, e1s_iocm_slot_id);
     return;
   }
 
+  if (fbgc_common_get_chassis_type(&chassis_type) < 0) {
+    syslog(LOG_WARNING, "%s() Failed to get chassis type.\n", __func__);
+    return;
+  }
+
   if (present_status[e1s_iocm_slot_id] == FRU_ABSENT) {
+    if ((chassis_type == CHASSIS_TYPE7) && (e1s_iocm_slot_id == T5_E1S0_T7_IOC_AVENGER)) {
+      memset(cmd, 0, sizeof(cmd));
+      snprintf(cmd, sizeof(cmd), "sv stop iocd_%d > /dev/null 2>&1", I2C_T5E1S0_T7IOC_BUS);
+      if (system(cmd) != 0) {
+        syslog(LOG_WARNING, "%s() Fail to stop IOC Daemon:%d\n", __func__, I2C_T5E1S0_T7IOC_BUS);
+        return;
+      }
+    }
+
     if (gpio_set_init_value_by_shadow(fbgc_get_gpio_name(gpio_power_good_pin[e1s_iocm_slot_id]), GPIO_VALUE_LOW) < 0) {
       syslog(LOG_ERR, "%s() Failed to disable E1.S %d/IOCM I2C\n", __func__, e1s_iocm_slot_id);
       return;
@@ -59,7 +74,8 @@ e1s_iocm_remove_event(int e1s_iocm_slot_id, uint8_t *present_status, uint8_t *gp
 
 static void
 e1s_iocm_insert_event(int e1s_iocm_slot_id, uint8_t *present_status, uint8_t *gpio_power_good_pin) {
-
+  char cmd[MAX_PATH_LEN] = {0};
+  uint8_t chassis_type = 0;
   uint8_t server_power_status = SERVER_POWER_ON;
 
   if ((present_status == NULL) || (gpio_power_good_pin == NULL)) {
@@ -72,10 +88,24 @@ e1s_iocm_insert_event(int e1s_iocm_slot_id, uint8_t *present_status, uint8_t *gp
     return;
   }
 
+  if (fbgc_common_get_chassis_type(&chassis_type) < 0) {
+    syslog(LOG_WARNING, "%s() Failed to get chassis type.\n", __func__);
+    return;
+  }
+
   if ((present_status[e1s_iocm_slot_id] == FRU_PRESENT) && (server_power_status == SERVER_POWER_ON)) {
     if (gpio_set_init_value_by_shadow(fbgc_get_gpio_name(gpio_power_good_pin[e1s_iocm_slot_id]), GPIO_VALUE_HIGH) < 0) {
       syslog(LOG_ERR, "%s() Failed to enable E1.S %d/IOCM I2C\n", __func__, e1s_iocm_slot_id);
       return;
+    }
+
+    if ((chassis_type == CHASSIS_TYPE7) && (e1s_iocm_slot_id == T5_E1S0_T7_IOC_AVENGER)) {
+      memset(cmd, 0, sizeof(cmd));
+      snprintf(cmd, sizeof(cmd), "sv start iocd_%d > /dev/null 2>&1", I2C_T5E1S0_T7IOC_BUS);
+      if (system(cmd) != 0) {
+        syslog(LOG_WARNING, "%s() Fail to start IOC Daemon:%d\n", __func__, I2C_T5E1S0_T7IOC_BUS);
+        return;
+      }
     }
   }
 }
@@ -85,6 +115,7 @@ fru_remove_event(int fru_id, uint8_t *e1s_iocm_present_status) {
   int ret = 0;
   uint8_t chassis_type = 0;
   uint8_t e1s_iocm_gpio_power_good_pin[E1S_IOCM_SLOT_NUM] = {GPIO_E1S_1_P3V3_PG_R, GPIO_E1S_2_P3V3_PG_R};
+  char cmd[MAX_FILE_PATH] = {0};
 
   if (fru_id == FRU_SERVER) {
     // AC off server
@@ -96,6 +127,13 @@ fru_remove_event(int fru_id, uint8_t *e1s_iocm_present_status) {
     pal_set_error_code(ERR_CODE_SERVER_MISSING, ERR_CODE_ENABLE);
     
   } else if (fru_id == FRU_SCC) {
+    // Stop SCC IOCD
+    memset(cmd, 0, sizeof(cmd));
+    snprintf(cmd, sizeof(cmd), "sv stop iocd_%d > /dev/null 2>&1", I2C_T5IOC_BUS);
+    if (system(cmd) != 0) {
+      syslog(LOG_WARNING, "%s() Fail to stop IOC Daemon:%d\n", __func__, I2C_T5IOC_BUS);
+      return;
+    }
     // AC off SCC
     ret = gpio_set_value_by_shadow(fbgc_get_gpio_name(GPIO_SCC_STBY_PWR_EN), GPIO_VALUE_LOW);
     if (ret < 0) {
@@ -210,6 +248,54 @@ fru_insert_event(int fru_id, uint8_t *e1s_iocm_present_status) {
   }
 }
 
+static void
+cache_post_code(uint8_t* post_code_buffer, size_t buf_len){
+  FILE *fp = NULL;
+  int ret = 0, count = 1;
+
+  if (post_code_buffer == NULL) {
+    syslog(LOG_WARNING, "%s: Fail to cache post code due to NULL parameter.", __func__);
+    return;
+  }
+
+  fp = fopen(POST_CODE_FILE, "w");
+  if (fp == NULL) {
+    syslog(LOG_WARNING, "%s: fail to open %s file because %s ", __func__, POST_CODE_FILE, strerror(errno));
+    return;
+  }
+
+  ret = pal_flock_retry(fileno(fp));
+  if (ret < 0) {
+    syslog(LOG_WARNING, "%s: fail to flock %s file because %s ", __func__, POST_CODE_FILE, strerror(errno));
+    fclose(fp);
+    return;
+  }
+
+  while (buf_len > 0) {
+    if (count > 16) {
+      fprintf(fp, "\n");
+      count=1;
+    }
+    fprintf(fp, "%02X ", post_code_buffer[buf_len-1]);
+    buf_len--;
+    count++;
+  }
+  fprintf(fp, "\n");
+
+  pal_unflock_retry(fileno(fp));
+  fclose(fp);
+}
+
+static void
+check_cache_post_code(){
+  if (access(POST_CODE_FILE, F_OK) == 0) {
+      //file exist
+      if (rename(POST_CODE_FILE, LAST_POST_CODE_FILE) != 0) {
+        syslog(LOG_WARNING, "%s: fail to rename %s to %s because %s ", __func__, POST_CODE_FILE, LAST_POST_CODE_FILE, strerror(errno));
+      }
+  }
+}
+
 static void *
 fru_missing_monitor() {
   uint8_t fru_present_flag = 0, chassis_type = 0, uic_location_id = 0;
@@ -223,6 +309,9 @@ fru_missing_monitor() {
   memset(&e1s_iocm_present_status, FRU_PRESENT, sizeof(e1s_iocm_present_status));
   memset(&fru_name, 0, sizeof(fru_name));
   
+  // set flag to notice BMC gpiod fru_missing_monitor is ready
+  kv_set("flag_gpiod_fru_miss", STR_VALUE_1, 0, 0);
+
   while(1) {
     for (fru_id = FRU_SERVER; fru_id < FRU_CNT; fru_id++) {
       if ((fru_id == FRU_SERVER) || (fru_id == FRU_SCC)) {
@@ -268,8 +357,7 @@ fru_missing_monitor() {
             if (fru_present_status[fru_id] == FRU_PRESENT) {
               syslog(LOG_CRIT, "ASSERT: iocm missing\n");
               fru_present_status[fru_id] = FRU_ABSENT;
-              fru_remove_event(fru_id, e1s_iocm_present_status);
-              
+
               if (is_e1s_iocm_present(T5_E1S0_T7_IOC_AVENGER) == false) {
                 e1s_iocm_present_status[T5_E1S0_T7_IOC_AVENGER] = FRU_ABSENT;
               }
@@ -277,6 +365,8 @@ fru_missing_monitor() {
               if (is_e1s_iocm_present(T5_E1S1_T7_IOCM_VOLT) == false) {
                 e1s_iocm_present_status[T5_E1S1_T7_IOCM_VOLT] = FRU_ABSENT;
               }
+
+              fru_remove_event(fru_id, e1s_iocm_present_status);
             }
           }
         
@@ -337,12 +427,18 @@ server_power_monitor() {
   char pwr_util_lock_file[MAX_FILE_PATH] = {0}; 
   uint8_t server_present = FRU_PRESENT;
   uint8_t server_pre_pwr_status = -1, server_cur_pwr_status = -1;
+  uint8_t post_code[MAX_POSTCODE_LEN] = {0};
+  size_t post_code_len = 0;
+  bool is_need_cache = true;
   int ret = 0;
   FILE *fp = NULL;
   
   memset(pwr_util_lock_file, 0, sizeof(pwr_util_lock_file));
   snprintf(pwr_util_lock_file, sizeof(pwr_util_lock_file), POWER_UTIL_LOCK, FRU_SERVER);
   
+  // set flag to notice BMC gpiod server_power_monitor is ready
+  kv_set("flag_gpiod_server_pwr", STR_VALUE_1, 0, 0);
+
   while(1) {
     if (pal_is_fru_prsnt(FRU_SERVER, &server_present) < 0) {
       syslog(LOG_WARNING, "%s(): fail to get fru: %d present status\n", __func__, FRU_SERVER);
@@ -351,6 +447,24 @@ server_power_monitor() {
       if (server_present == FRU_PRESENT) {
         ret = pal_get_server_power(FRU_SERVER, &server_cur_pwr_status);
         if (ret == 0) {
+          //*****Store server post code
+          if (server_cur_pwr_status == SERVER_POWER_ON) {
+            if (is_need_cache == true) {
+              memset(&post_code, 0, sizeof(post_code));
+              if (pal_get_80port_record(FRU_SERVER, post_code, MAX_POSTCODE_LEN, &post_code_len) == 0) {
+                cache_post_code(post_code, post_code_len);
+                // Stop storing post code when server boot into OS
+                if (post_code[0] == 0x00) {
+                  is_need_cache = false;
+                }
+              } else {
+                syslog(LOG_WARNING, "%s(): Fail to get post code from BIC", __func__);
+              }
+            }
+          } else {
+            check_cache_post_code();
+          }
+
           //*****Server power from on change to off
           if ((server_pre_pwr_status == SERVER_POWER_ON)
            && ((server_cur_pwr_status == SERVER_POWER_OFF) || (server_cur_pwr_status == SERVER_12V_OFF))) {
@@ -373,7 +487,8 @@ server_power_monitor() {
             } else {
               fclose(fp);
             }
-
+            // Store post code when server power on
+            is_need_cache = true;
             syslog(LOG_CRIT, "FRU: %d, Server is powered on", FRU_SERVER);
           }
 
@@ -399,6 +514,9 @@ scc_stby_power_monitor() {
     syslog(LOG_ERR, "Failed to start SCC stby power monitor, GPIO name mapping error");
     pthread_exit(NULL);
   }
+
+  // set flag to notice BMC gpiod scc_stby_power_monitor is ready
+  kv_set("flag_gpiod_scc_pwr", STR_VALUE_1, 0, 0);
 
   while (1) {
     scc_stby_pg_value = gpio_get_value_by_shadow(STR_SCC_STBY_PGOOD);

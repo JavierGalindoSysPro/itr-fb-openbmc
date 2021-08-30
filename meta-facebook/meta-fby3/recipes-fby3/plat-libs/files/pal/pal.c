@@ -69,10 +69,14 @@ const char pal_server_list[] = "slot1, slot2, slot3, slot4";
 const char pal_dev_fru_list[] = "all, 1U, 2U, 1U-dev0, 1U-dev1, 1U-dev2, 1U-dev3, 2U-dev0, 2U-dev1, 2U-dev2, 2U-dev3, 2U-dev4, 2U-dev5, " \
                             "2U-dev6, 2U-dev7, 2U-dev8, 2U-dev9, 2U-dev10, 2U-dev11, 2U-dev12, 2U-dev13";
 const char pal_dev_pwr_list[] = "all, 1U-dev0, 1U-dev1, 1U-dev2, 1U-dev3, 2U-dev0, 2U-dev1, 2U-dev2, 2U-dev3, 2U-dev4, 2U-dev5, " \
-                            "2U-dev6, 2U-dev7, 2U-dev8, 2U-dev9, 2U-dev10, 2U-dev11, 2U-dev12, 2U-dev13";
+                            "2U-dev6, 2U-dev7, 2U-dev8, 2U-dev9, 2U-dev10, 2U-dev11, 2U-dev12, 2U-dev13, " \
+                            "2U-dev0_1, 2U-dev2_3, 2U-dev4_5, 2U-dev6_7, 2U-dev8_9, 2U-dev10_11";
 const char pal_dev_pwr_option_list[] = "status, off, on, cycle";
+const char pal_m2_dual_list[] = "";
 
 static char sel_error_record[NUM_SERVER_FRU] = {0};
+
+const char pal_fru_exp_list[] = "2U, 2U-cwc, 2U-top, 2U-bot";
 
 #define SYSFW_VER "sysfw_ver_slot"
 #define SYSFW_VER_STR SYSFW_VER "%d"
@@ -92,14 +96,21 @@ static char sel_error_record[NUM_SERVER_FRU] = {0};
 #define ENABLE_STR "enable"
 #define DISABLE_STR "disable"
 #define STATUS_STR "status"
+#define WAKEUP_STR "wakeup"
+#define SLEEP_STR  "sleep"
 #define FAN_MODE_FILE "/tmp/cache_store/fan_mode"
 #define FAN_MODE_STR_LEN 8 // include the string terminal
 
 #define IPMI_GET_VER_FRU_NUM  5
 #define IPMI_GET_VER_MAX_COMP 9
-#define MAX_FW_VER_LEN        32  //include the string terminal 
+#define MAX_FW_VER_LEN        32  //include the string terminal
 
-#define MAX_COMPONENT_LEN 32 //include the string terminal 
+#define MAX_COMPONENT_LEN 32 //include the string terminal
+
+#define MAX_PWR_LOCK_STR 32
+
+static int key_func_por_cfg(int event, void *arg);
+static int key_func_pwr_last_state(int event, void *arg);
 
 enum key_event {
   KEY_BEFORE_SET,
@@ -122,15 +133,15 @@ struct pal_key_cfg {
   {SYSFW_VER "2", "0", NULL},
   {SYSFW_VER "3", "0", NULL},
   {SYSFW_VER "4", "0", NULL},
-  {"pwr_server1_last_state", "on", NULL},
-  {"pwr_server2_last_state", "on", NULL},
-  {"pwr_server3_last_state", "on", NULL},
-  {"pwr_server4_last_state", "on", NULL},
+  {"pwr_server1_last_state", "on", key_func_pwr_last_state},
+  {"pwr_server2_last_state", "on", key_func_pwr_last_state},
+  {"pwr_server3_last_state", "on", key_func_pwr_last_state},
+  {"pwr_server4_last_state", "on", key_func_pwr_last_state},
   {"timestamp_sled", "0", NULL},
-  {"slot1_por_cfg", "lps", NULL},
-  {"slot2_por_cfg", "lps", NULL},
-  {"slot3_por_cfg", "lps", NULL},
-  {"slot4_por_cfg", "lps", NULL},
+  {"slot1_por_cfg", "lps", key_func_por_cfg},
+  {"slot2_por_cfg", "lps", key_func_por_cfg},
+  {"slot3_por_cfg", "lps", key_func_por_cfg},
+  {"slot4_por_cfg", "lps", key_func_por_cfg},
   {"slot1_boot_order", "0100090203ff", NULL},
   {"slot2_boot_order", "0100090203ff", NULL},
   {"slot3_boot_order", "0100090203ff", NULL},
@@ -311,6 +322,26 @@ pal_key_index(char *key) {
   syslog(LOG_WARNING, "pal_key_index: invalid key - %s", key);
 #endif
   return -1;
+}
+
+static int
+key_func_pwr_last_state(int event, void *arg) {
+  if (event == KEY_BEFORE_SET) {
+    if (strcmp((char *)arg, "on") && strcmp((char *)arg, "off"))
+      return -1;
+  }
+
+  return 0;
+}
+
+static int
+key_func_por_cfg(int event, void *arg) {
+  if (event == KEY_BEFORE_SET) {
+    if (strcmp((char *)arg, "lps") && strcmp((char *)arg, "on") && strcmp((char *)arg, "off"))
+      return -1;
+  }
+
+  return 0;
 }
 
 int
@@ -521,24 +552,105 @@ error_exit:
   return ret;
 }
 
-bool
-pal_is_fw_update_ongoing(uint8_t fruid) {
-  char key[MAX_KEY_LEN];
-  char value[MAX_VALUE_LEN] = {0};
-  int ret;
+int
+pal_set_fw_update_ongoing(uint8_t fruid, uint16_t tmout) {
+  char key[64] = {0};
+  char value[64] = {0};
   struct timespec ts;
+  static uint8_t bmc_location = 0;
+  static bool is_called = false;
 
-  sprintf(key, "fru%d_fwupd", fruid);
-  ret = kv_get(key, value, NULL, 0);
-  if (ret < 0) {
-     return false;
+  // get the location
+  if ( (bmc_location == 0) && (fby3_common_get_bmc_location(&bmc_location) < 0) ) {
+    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
+    return PAL_ENOTSUP;
   }
 
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  if (strtoul(value, NULL, 10) > ts.tv_sec)
-     return true;
+  if ( is_called == true ) return PAL_EOK;
 
-  return false;
+  // postprocess function
+  // the destructor in fw-util(system.cpp) will call set_update_ongoing twice
+  // add the flag to avoid running it again
+  if ( tmout == 0 ) {
+    if ( bmc_location == NIC_BMC ) {
+      sleep(3);
+    }
+    is_called = true;
+  }
+
+  // set fw_update_ongoing flag
+  sprintf(key, "fru%d_fwupd", fruid);
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  ts.tv_sec += tmout;
+  sprintf(value, "%ld", ts.tv_sec);
+
+  if (kv_set(key, value, 0, 0) < 0) {
+     return -1;
+  }
+
+  // preprocess function
+  if ( (bmc_location == NIC_BMC) && (tmout > 0) ) {
+    // when fw_update_ongoing is set, need to wait for a while
+    // make sure all daemons go into pal_is_fw_update_ongoing
+    sleep(5);
+  }
+
+  // set pwr_lock_flag to prevent unexpected power control
+  if ( (bmc_location == NIC_BMC) && \
+       (bic_set_crit_act_flag((tmout > 0)?SEL_ASSERT:SEL_DEASSERT) < 0) ) {
+    printf("Failed to set power lock, dir_type = %s\n", (tmout > 0)?"ASSERT":"DEASSERT");
+    return PAL_ENOTSUP;
+  }
+
+  return PAL_EOK;
+}
+
+bool
+pal_get_crit_act_status(int fd) {
+#define SB_CPLD_PWR_LOCK_REGISTER 0x10
+  int ret = PAL_EOK;
+  uint8_t tbuf = SB_CPLD_PWR_LOCK_REGISTER;
+  uint8_t rbuf = 0x0;
+  uint8_t tlen = 1;
+  uint8_t rlen = 1;
+  uint8_t retry = MAX_READ_RETRY;
+
+  do {
+    ret = i2c_rdwr_msg_transfer(fd, CPLD_ADDRESS, &tbuf, tlen, &rbuf, rlen);
+    if ( ret < 0 ) msleep(100);
+    else break;
+  } while( retry-- > 0 );
+
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to do I2C Rd/Wr, something went wrong?", __func__);
+    rbuf = 1; // If something went wrong, don't lock the power or users can't run sled-cycle
+  }
+
+  return (rbuf == 0); // rbuf == 0 means power lock flag is asserted;
+}
+
+// for class 2 only
+bool
+pal_is_fan_manual_mode(uint8_t slot_id) {
+  char value[MAX_VALUE_LEN] = {0};
+  int ret = kv_get("fan_manual", value, NULL, 0);
+
+  if (ret < 0) {
+    // return false because there is no critical activity in progress
+    if (errno == ENOENT) {
+      return false;
+    }
+
+    syslog(LOG_WARNING, "%s() Cannot get fan_manual", __func__);
+    return true;
+  }
+
+  return (strncmp(value, "1", 1) == 0)?true:false;
+}
+
+bool
+pal_is_fw_update_ongoing(uint8_t fruid) {
+  return bic_is_fw_update_ongoing(fruid);
 }
 
 int
@@ -625,6 +737,21 @@ pal_get_fru_capability(uint8_t fru, unsigned int *caps)
     case FRU_BB:
       *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_READ;
       break;
+    case FRU_CWC:
+      if (pal_is_cwc() == PAL_EOK) {
+        *caps = FRU_CAPABILITY_FRUID_ALL;
+      } else {
+        ret = -1;
+      }
+      break;
+    case FRU_2U_TOP:
+    case FRU_2U_BOT:
+      if (pal_is_cwc() == PAL_EOK) {
+        *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_HAS_DEVICE;
+      } else {
+        ret = -1;
+      }
+      break;
     default:
       ret = -1;
       break;
@@ -635,13 +762,24 @@ pal_get_fru_capability(uint8_t fru, unsigned int *caps)
 int
 pal_get_dev_capability(uint8_t fru, uint8_t dev, unsigned int *caps)
 {
-  if (fru < FRU_SLOT1 || fru > FRU_SLOT4)
-    return -1;
+  if (pal_is_cwc() == PAL_EOK) {
+    if (fru != FRU_SLOT1 && fru != FRU_2U_TOP && fru != FRU_2U_BOT) {
+        return -1;
+    }
+  } else if (fru < FRU_SLOT1 || fru > FRU_SLOT4) {
+      return -1;
+  }
   if (dev >= DEV_ID0_1OU && dev <= DEV_ID13_2OU) {
     *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
       (FRU_CAPABILITY_POWER_ALL & (~FRU_CAPABILITY_POWER_RESET));
   } else if (dev >= BOARD_1OU && dev <= BOARD_2OU) {
     *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+  } else if (dev >= BOARD_2OU_TOP && dev <= BOARD_2OU_CWC) {
+    if (pal_is_cwc() == PAL_EOK) {
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+    } else {
+      *caps = 0;
+    }
   } else {
     *caps = 0;
   }
@@ -737,12 +875,18 @@ pal_get_slot_index(unsigned char payload_id)
 int
 pal_is_fru_prsnt(uint8_t fru, uint8_t *status) {
   int ret = PAL_EOK;
-  uint8_t bmc_location = 0;
+  int val = 0;
+  uint8_t bmc_location = 0, board_type = 0;
 
   ret = fby3_common_get_bmc_location(&bmc_location);
   if ( ret < 0 ) {
     syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
     return ret;
+  }
+  if ( bmc_location == NIC_BMC ) {
+    if (fby3_common_get_2ou_board_type(FRU_SLOT1, &board_type) < 0) {
+      syslog(LOG_WARNING, "Failed to get slot1 2ou board type\n");
+    }
   }
 
   switch (fru) {
@@ -771,6 +915,37 @@ pal_is_fru_prsnt(uint8_t fru, uint8_t *status) {
       break;
     case FRU_BMC:
       *status = 1;
+      break;
+    case FRU_2U:
+      if (board_type == GPV3_MCHP_BOARD || board_type == GPV3_BRCM_BOARD) {
+        *status = 1;
+      } else {
+        *status = 0;
+      }
+      break;
+    case FRU_CWC:
+      if (board_type == CWC_MCHP_BOARD) {
+        *status = 1;
+      } else {
+        *status = 0;
+      }
+      break;
+    case FRU_2U_TOP:
+    case FRU_2U_BOT:
+      if (board_type == CWC_MCHP_BOARD) {
+        if ((val = bic_is_2u_top_bot_prsnt(FRU_SLOT1)) > 0) {
+          if ((fru == FRU_2U_TOP && (val & PRESENT_2U_TOP)) ||
+              (fru == FRU_2U_BOT && (val & PRESENT_2U_BOT))) {
+            *status = 1;
+          } else {
+            *status = 0;
+          }
+        } else {
+          *status = 0;
+        }
+      } else {
+        *status = 0;
+      }
       break;
     default:
       *status = 0;
@@ -834,6 +1009,18 @@ pal_get_fru_name(uint8_t fru, char *name) {
       break;
     case FRU_NICEXP:
       sprintf(name, "nicexp");
+      break;
+    case FRU_2U:
+      sprintf(name, DEV_NAME_2U);
+      break;
+    case FRU_CWC:
+      sprintf(name, DEV_NAME_2U_CWC);
+      break;
+    case FRU_2U_TOP:
+      sprintf(name, DEV_NAME_2U_TOP);
+      break;
+    case FRU_2U_BOT:
+      sprintf(name, DEV_NAME_2U_BOT);
       break;
     case FRU_AGGREGATE:
       ret = PAL_EOK; //it's the virtual FRU.
@@ -926,6 +1113,15 @@ pal_get_fruid_path(uint8_t fru, char *path) {
   case FRU_NICEXP:
     sprintf(fname, "nicexp");
     break;
+  case FRU_CWC:
+    sprintf(fname, "slot1_dev%d", BOARD_2OU_CWC);
+    break;
+  case FRU_2U_TOP:
+    sprintf(fname, "slot1_dev%d", BOARD_2OU_TOP);
+    break;
+  case FRU_2U_BOT:
+    sprintf(fname, "slot1_dev%d", BOARD_2OU_BOT);
+    break;
   default:
     syslog(LOG_WARNING, "%s() unknown fruid %d", __func__, fru);
     ret = PAL_ENOTSUP;
@@ -957,6 +1153,7 @@ pal_dev_fruid_write(uint8_t fru, uint8_t dev_id, char *path) {
   uint8_t config_status = 0;
   uint8_t bmc_location = 0;
   uint8_t type_2ou = UNKNOWN_BOARD;
+  uint8_t slot = (fru == FRU_2U_TOP || fru == FRU_2U_BOT) ? FRU_SLOT1 : fru;
 
   ret = fby3_common_get_bmc_location(&bmc_location);
   if ( ret < 0 ) {
@@ -964,7 +1161,7 @@ pal_dev_fruid_write(uint8_t fru, uint8_t dev_id, char *path) {
     return ret;
   }
 
-  ret = bic_is_m2_exp_prsnt(fru);
+  ret = bic_is_m2_exp_prsnt(slot);
   if ( ret < 0 ) {
     printf("%s() Couldn't get the status of 1OU/2OU\n", __func__);
     return ret;
@@ -975,21 +1172,45 @@ pal_dev_fruid_write(uint8_t fru, uint8_t dev_id, char *path) {
   if ( (dev_id == BOARD_1OU) && ((config_status & PRESENT_1OU) == PRESENT_1OU) && (bmc_location != NIC_BMC) ) { // 1U
     return bic_write_fruid(fru, 0, path, FEXP_BIC_INTF);
   } else if ( (config_status & PRESENT_2OU) == PRESENT_2OU ) {
-    if ( fby3_common_get_2ou_board_type(fru, &type_2ou) < 0 ) {
+    if ( fby3_common_get_2ou_board_type(slot, &type_2ou) < 0 ) {
       syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
+    }
+    if (type_2ou == CWC_MCHP_BOARD) {
+      if (dev_id == BOARD_2OU_CWC) {
+        return bic_write_fruid(fru, 0, path, REXP_BIC_INTF);
+      } else if (dev_id == BOARD_2OU_TOP) {
+        return bic_write_fruid(fru, 0, path, RREXP_BIC_INTF1);
+      } else if (dev_id == BOARD_2OU_BOT) {
+        return bic_write_fruid(fru, 0, path, RREXP_BIC_INTF2);
+      }
+
+      /**
+       * Do not write vendor fru
+       */
+      printf("Fru write to this device is not supported\n");
     } else if ( dev_id == BOARD_2OU && type_2ou == DP_RISER_BOARD ) {
       return bic_write_fruid(fru, 1, path, NONE_INTF);
     } else if ( dev_id == BOARD_2OU ) {
       return bic_write_fruid(fru, 0, path, REXP_BIC_INTF);
     } else if ( dev_id >= DEV_ID0_2OU && dev_id <= DEV_ID11_2OU ) {
-      return bic_write_fruid(fru, dev_id - DEV_ID0_2OU + 1, path, REXP_BIC_INTF);
+      // BMC shouldn't have the access to write the FRU that belongs to the vendor since we don't know the writing rules
+      // We only have the read access
+      if ( type_2ou != GPV3_MCHP_BOARD ) {
+        return bic_write_fruid(fru, dev_id - DEV_ID0_2OU + 1, path, REXP_BIC_INTF);
+      }
+      printf("The device doesn't support the function\n");
     } else {
-      printf("Dev%d is not supported on 2OU!\n", dev_id);
+      printf("The illegal dev%d is detected!\n", dev_id);
     }
+
+    // if we reach here, it means something went wrong
+    // normally, we should return in the previous statements
+    ret = PAL_ENOTSUP;
   } else {
     printf("%s is not present!\n", (dev_id == BOARD_1OU)?"1OU":"2OU");
     return PAL_ENOTSUP;
   }
+
   return ret;
 }
 
@@ -1052,6 +1273,10 @@ pal_is_fru_ready(uint8_t fru, uint8_t *status) {
     case FRU_SLOT2:
     case FRU_SLOT3:
     case FRU_SLOT4:
+    case FRU_2U:
+    case FRU_CWC:
+    case FRU_2U_TOP:
+    case FRU_2U_BOT:
       ret = pal_get_server_12v_power(fru, &status_12v);
       if(ret < 0 || status_12v == SERVER_12V_OFF) {
         *status = 0;
@@ -1358,6 +1583,57 @@ static int pal_get_dp_pcie_config(uint8_t slot_id, uint8_t *pcie_config) {
   return 0;
 }
 
+static int pal_get_e1s_pcie_config(uint8_t slot_id, uint8_t *pcie_config) {
+  int retry = 0;
+  int ret = 0;
+  int ssd_count = 0;
+  int i2cfd = -1;
+  uint8_t bus = 0;
+  uint8_t tbuf[2] = {0x05};
+  uint8_t rbuf[2] = {0};
+
+  ret = fby3_common_get_bus_id(slot_id);
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Cannot get the bus with fru%d", __func__, slot_id);
+    return -1;
+  }
+
+  bus = (uint8_t)ret + 4;
+  i2cfd = i2c_cdev_slave_open(bus, SB_CPLD_ADDR, I2C_SLAVE_FORCE_CLAIM);
+  if ( i2cfd < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to open bus %d. Err: %s", __func__, bus, strerror(errno));
+    return -1;
+  }
+
+  while (retry < 3) {
+    ret = i2c_rdwr_msg_transfer(i2cfd, (SB_CPLD_ADDR << 1), tbuf, 1, rbuf, 1);
+    if (ret == 0)
+      break;
+    retry++;
+  }
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer", __func__);
+    return -1;
+  }
+
+  if ( i2cfd > 0 ) close(i2cfd);
+
+  for(int i=1; i<=4; i++) {
+    if ( (rbuf[0] & (0x1<<i)) == 0 ) {
+      ssd_count++;
+    }
+  }
+  syslog(LOG_WARNING, "%s() ssd_count: %d", __func__, ssd_count);
+
+  if (ssd_count >= 2) {
+    *pcie_config = CONFIG_B_E1S_T3;
+  } else {
+    *pcie_config = CONFIG_B_E1S_T10;
+  }
+
+  return 0;
+}
+
 int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
   uint8_t pcie_conf = 0xff;
   uint8_t *data = res_data;
@@ -1393,7 +1669,11 @@ int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, u
     } else if (config_status == 1) {
       bic_get_1ou_type(slot, &type_1ou);
       if (type_1ou == EDSFF_1U) {
-        pcie_conf = CONFIG_B_E1S;
+        if (pal_get_e1s_pcie_config(slot, &pcie_conf)) {
+          // Unable to get correct PCIE configuration
+          pcie_conf = CONFIG_B_E1S_T10;
+        }
+        syslog(LOG_INFO, "%s() pcie_conf = %02X\n", __func__, pcie_conf);
       } else {
         pcie_conf = CONFIG_B;
       }
@@ -1405,6 +1685,8 @@ int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, u
   } else {
     if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
       pcie_conf = CONFIG_C_GPV3;
+    } else if ( type_2ou == CWC_MCHP_BOARD ) {
+      pcie_conf = CONFIG_C_CWC_SINGLE;
     } else {
       pcie_conf = CONFIG_C;
     }
@@ -1864,19 +2146,14 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
     SYS_SLOT_PRSNT     = 0x11,
     SYS_PESW_ERR       = 0x12,
     SYS_2OU_VR_FAULT   = 0x13,
-    SYS_FAN_SERVICE    = 0x14,
-    SYS_BB_FW_EVENT    = 0x15,
     SYS_DP_X8_PWR_FAULT   = 0x16,
     SYS_DP_X16_PWR_FAULT  = 0x17,
-    SYS_ACK_SEL           = 0x18,
-    SYS_SLED_PWR_CTRL     = 0x60,
+    E1S_1OU_M2_PRESENT    = 0x80,
     E1S_1OU_HSC_PWR_ALERT = 0x82,
   };
   uint8_t event = event_data[0];
   char prsnt_str[32] = {0};
   char log_msg[MAX_ERR_LOG_SIZE] = {0};
-  char fan_mode_str[FAN_MODE_STR_LEN] = {0};
-  char component_str[MAX_COMPONENT_LEN] = {0};
   uint8_t type_2ou = UNKNOWN_BOARD;
 
   switch (event) {
@@ -1942,33 +2219,6 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
       pal_get_2ou_vr_str_name(event_data[1], event_data[2], error_log);
       strcat(error_log, "2OU VR fault");
       break;
-    case SYS_FAN_SERVICE:
-      if (event_data[2] == FAN_MANUAL_MODE) {
-        snprintf(fan_mode_str, sizeof(fan_mode_str), "manual");
-      } else {
-        snprintf(fan_mode_str, sizeof(fan_mode_str), "auto");
-      }
-      if ((event_data[1] == FRU_SLOT1) || (event_data[1] == FRU_SLOT3)) {
-        snprintf(log_msg, sizeof(log_msg), "Fan mode changed to %s mode by slot%d", fan_mode_str, event_data[1]);
-      } else {
-        snprintf(log_msg, sizeof(log_msg), "Fan mode changed to %s mode by unknown slot", fan_mode_str);
-      }
-      
-      strcat(error_log, log_msg);
-      break;
-    case SYS_BB_FW_EVENT:
-      if (event_data[1] == FW_BB_BIC) {
-        strncpy(component_str, "BIC", sizeof(component_str));
-      } else if (event_data[1] == FW_BB_BIC_BOOTLOADER) {
-        strncpy(component_str, "BIC bootloader", sizeof(component_str));
-      } else if (event_data[1] == FW_BB_CPLD) {
-        strncpy(component_str, "CPLD", sizeof(component_str));
-      } else {
-        strncpy(component_str, "unknown component", sizeof(component_str));
-      }
-      snprintf(log_msg, sizeof(log_msg), "Baseboard firmware %s update is ongoing", component_str);
-      strcat(error_log, log_msg);
-      break;
     case SYS_DP_X8_PWR_FAULT:
       fby3_common_get_2ou_board_type(fru, &type_2ou);
       if (type_2ou == M2_BOARD) {
@@ -1986,22 +2236,12 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
     case SYS_DP_X16_PWR_FAULT:
       strcat(error_log, "DP x16 Riser Power Fault");
       break;
-    case SYS_ACK_SEL:
-      if (event_data[1] == SYS_FAN_SERVICE) {
-        strcat(error_log, "Add SEL to notify fan mode event successfully");
-      } else if (event_data[1] == SYS_BB_FW_EVENT) {
-        strcat(error_log, "Add SEL to notify BB firmware update event successfully");
-      }
-      break;
-    case SYS_SLED_PWR_CTRL:
-      strcat(error_log, "SLED Power Lock");
-      // the longest time spent is to update PESW recovery update, it spends about 2000s
-      // set 2400s for insurance
-      if (event_data[1] == SEL_ASSERT) pal_set_fw_update_ongoing(FRU_SLOT1, 60*40);
-      else pal_set_fw_update_ongoing(FRU_SLOT1, 0);
-      break;
     case E1S_1OU_HSC_PWR_ALERT:
       strcat(error_log, "E1S 1OU HSC Power");
+      break;
+    case E1S_1OU_M2_PRESENT:
+      snprintf(log_msg, sizeof(log_msg), "E1S 1OU M.2 dev%d present", event_data[2]);
+      strcat(error_log, log_msg);
       break;
     default:
       strcat(error_log, "Undefined system event");
@@ -2064,7 +2304,6 @@ pal_parse_pwr_detect_event(uint8_t fru, uint8_t *event_data, char *error_log) {
 
   switch (event_data[0]) {
     case SLED_CYCLE:
-      pal_set_nic_perst(fru, NIC_PE_RST_LOW);
       strcat(error_log, "SLED_CYCLE by BB BIC");
       break;
     case SLOT:
@@ -2249,23 +2488,60 @@ pal_log_clear(char *fru) {
 int
 pal_is_debug_card_prsnt(uint8_t *status) {
   int ret = -1;
-  gpio_value_t value;
-  gpio_desc_t *gpio = gpio_open_by_shadow(GPIO_OCP_DEBUG_BMC_PRSNT_N);
-  if (!gpio) {
+  uint8_t bmc_location = 0;
+  int retry = 0;
+
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
     return -1;
   }
 
-  ret = gpio_get_value(gpio, &value);
-  gpio_close(gpio);
+  if(bmc_location == NIC_BMC) {
+    // when updating firmware, front-paneld should pend to avoid the invalid access
+    if ( pal_is_fw_update_ongoing(FRU_SLOT1) == true || \
+         bic_is_crit_act_ongoing(FRU_SLOT1) == true ) return PAL_ENOTSUP;
 
-  if (ret != 0) {
-    return -1;
+    uint8_t tbuf[3] = {0x9c, 0x9c, 0x00};
+    uint8_t rbuf[16] = {0x00};
+    uint8_t tlen = 3;
+    uint8_t rlen = 1;
+
+    while (retry < 3) {
+      ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_GET_DBG_PRSNT, tbuf, tlen, rbuf, &rlen, BB_BIC_INTF);
+      if (ret == 0) {
+        break;
+      }
+      retry++;
+    }
+
+    if (ret != 0) {
+      return -1;
+    }
+    if(rbuf[3] == 0x0) {
+       *status = 1;
+    } else {
+      *status = 0;
+    }
   }
+  else {
+    gpio_value_t value;
+    gpio_desc_t *gpio = gpio_open_by_shadow(GPIO_OCP_DEBUG_BMC_PRSNT_N);
+    if (!gpio) {
+      return -1;
+    }
 
-  if (value == 0x0) {
-    *status = 1;
-  } else {
-    *status = 0;
+    ret = gpio_get_value(gpio, &value);
+    gpio_close(gpio);
+
+    if (ret != 0) {
+      return -1;
+    }
+    if (value == 0x0) {
+      *status = 1;
+    } else {
+      *status = 0;
+    }
   }
 
   return 0;
@@ -2281,37 +2557,50 @@ pal_set_uart_IO_sts(uint8_t slot_id, uint8_t io_sts) {
   int st_idx = slot_id, end_idx = slot_id;
   uint8_t tbuf[2] = {0x00};
   uint8_t tlen = 2;
+  uint8_t bmc_location = 0; //the value of bmc_location is board id.
 
-  i2cfd = i2c_cdev_slave_open(BB_CPLD_BUS, CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
-  if ( i2cfd < 0 ) {
-    syslog(LOG_WARNING, "Failed to open bus 12\n");
-    return i2cfd;
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
+    return -1;
   }
 
-  // adjust the st_idx and end_idx, we need to reset all reg values
-  // when uart_pos is at BMC position
-  if ( slot_id == UART_POS_BMC ) {
-    st_idx = FRU_SLOT1;
-    end_idx = FRU_SLOT4;
+  if (bmc_location == NIC_BMC) {
+    //did not set cpld register
+    ret = 0;
   }
+  else {
+    i2cfd = i2c_cdev_slave_open(BB_CPLD_BUS, CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
+    if ( i2cfd < 0 ) {
+      syslog(LOG_WARNING, "Failed to open bus 12\n");
+      return i2cfd;
+    }
 
-  do {
-     tbuf[0] = BB_CPLD_IO_BASE_OFFSET + st_idx; //get the correspoding reg
-     tbuf[1] = io_sts; // data to be written
-     ret = i2c_rdwr_msg_transfer(i2cfd, CPLD_ADDRESS, tbuf, tlen, NULL, 0);
-     if ( ret < 0 ) {
-       retry--;
-     } else {
-       st_idx++; //move on
-       retry = MAX_RETRY; //reset it
-     }
-  } while ( retry > 0 && st_idx <= end_idx );
+    // adjust the st_idx and end_idx, we need to reset all reg values
+    // when uart_pos is at BMC position
+    if ( slot_id == UART_POS_BMC ) {
+      st_idx = FRU_SLOT1;
+      end_idx = FRU_SLOT4;
+    }
 
-  if ( retry == 0 ) {
-    syslog(LOG_WARNING, "Failed to update IO sts after performed 3 time attempts. reg:%02X, data: %02X\n", tbuf[0], tbuf[1]);
+    do {
+       tbuf[0] = BB_CPLD_IO_BASE_OFFSET + st_idx; //get the corresponding reg
+       tbuf[1] = io_sts; // data to be written
+       ret = i2c_rdwr_msg_transfer(i2cfd, CPLD_ADDRESS, tbuf, tlen, NULL, 0);
+       if ( ret < 0 ) {
+         retry--;
+       } else {
+         st_idx++; //move on
+         retry = MAX_RETRY; //reset it
+       }
+    } while ( retry > 0 && st_idx <= end_idx );
+
+    if ( retry == 0 ) {
+      syslog(LOG_WARNING, "Failed to update IO sts after performed 3 time attempts. reg:%02X, data: %02X\n", tbuf[0], tbuf[1]);
+    }
+
+    if ( i2cfd > 0 ) close(i2cfd);
   }
-
-  if ( i2cfd > 0 ) close(i2cfd);
   return ret;
 }
 
@@ -2335,29 +2624,67 @@ pal_get_uart_select_from_cpld(uint8_t *uart_select) {
   int fd = 0;
   int retry = 3;
   int ret = -1;
-  uint8_t tbuf[1] = {0x00};
-  uint8_t rbuf[1] = {0x00};
+  uint8_t tbuf[3] = {0x00};
+  uint8_t rbuf[4] = {0x00};
   uint8_t tlen = 0;
   uint8_t rlen = 0;
+  uint8_t bmc_location = 0; //the value of bmc_location is board id.
 
-  fd = open("/dev/i2c-12", O_RDWR);
-  if (fd < 0) {
-    syslog(LOG_WARNING, "Failed to open bus 12");
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
     return -1;
   }
 
-  tbuf[0] = DEBUG_CARD_UART_MUX;
-  tlen = 1;
-  rlen = 1;
+  if(bmc_location == NIC_BMC) {
+    tbuf[0] = 0x9c;
+    tbuf[1] = 0x9c;
+    tbuf[2] = 0x00;
+    tlen = 3;
+    rlen = 1;
 
-  while (ret < 0 && retry-- > 0) {
-    ret = i2c_rdwr_msg_transfer(fd, CPLD_ADDRESS, tbuf, tlen, rbuf, rlen);
-  }
-  if (fd > 0) {
-    close(fd);
-  }
-  if (ret < 0) {
-    return -1;
+    retry = 0;
+
+    while (retry < 3) {
+      ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_GET_DBG_UART, tbuf, tlen, rbuf, &rlen, BB_BIC_INTF);
+      if (ret == 0) {
+        break;
+      }
+      retry++;
+    }
+    if (ret != 0) {
+      return -1;
+    }
+
+    if((rbuf[3] == 0) || (rbuf[3] == 1) || (rbuf[3] == 4))
+      rbuf[0] = 0;
+    else if((rbuf[3] == 2) || (rbuf[3] == 3) || (rbuf[3] == 5) || (rbuf[3] == 6))
+      rbuf[0] = 1;
+    else
+      return -1;
+  } else {
+    fd = open("/dev/i2c-12", O_RDWR);
+    if (fd < 0) {
+      syslog(LOG_WARNING, "Failed to open bus 12");
+      return -1;
+    }
+
+    tbuf[0] = DEBUG_CARD_UART_MUX;
+    tlen = 1;
+    rlen = 1;
+
+    while (retry-- > 0) {
+      ret = i2c_rdwr_msg_transfer(fd, CPLD_ADDRESS, tbuf, tlen, rbuf, rlen);
+      if (ret == 0) {
+        break;
+      }
+    }
+    if (fd > 0) {
+      close(fd);
+    }
+    if (ret < 0) {
+      return -1;
+    }
   }
 
   *uart_select = rbuf[0];
@@ -2371,40 +2698,73 @@ pal_post_display(uint8_t uart_select, uint8_t postcode) {
   int ret = -1;
   uint8_t tlen = 0;
   uint8_t rlen = 0;
-  uint8_t tbuf[2] = {0x00};
+  uint8_t tbuf[5] = {0x00};
   uint8_t rbuf[1] = {0x00};
   uint8_t offset = 0;
+  uint8_t bmc_location = 0; //the value of bmc_location is board id.
+  uint8_t index = 0;
 
-  fd = open("/dev/i2c-12", O_RDWR);
-  if (fd < 0) {
-    syslog(LOG_WARNING, "Failed to open bus 12");
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
     return -1;
   }
 
-  switch (uart_select) {
-    case 1:
-      offset = SLOT1_POSTCODE_OFFSET;
-      break;
-    case 2:
-      offset = SLOT2_POSTCODE_OFFSET;
-      break;
-    case 3:
-      offset = SLOT3_POSTCODE_OFFSET;
-      break;
-    case 4:
-      offset = SLOT4_POSTCODE_OFFSET;
-      break;
-  }
+  if(bmc_location == NIC_BMC) {
+    uint8_t bus = 0;
 
-  tbuf[0] = offset;
-  tbuf[1] = postcode;
-  tlen = 2;
-  rlen = 0;
-  while (ret < 0 && retry-- > 0) {
-    ret = i2c_rdwr_msg_transfer(fd, CPLD_ADDRESS, tbuf, tlen, rbuf, rlen);
+    if(bic_get_mb_index(&index) !=0)
+      return -1;
+
+    if((uart_select == FRU_SLOT1) && (index == FRU_SLOT3))
+      offset = SLOT3_POSTCODE_OFFSET;
+    else
+      offset = SLOT1_POSTCODE_OFFSET;
+
+    tbuf[0] = (bus << 1) + 1;
+    tbuf[1] = CPLD_ADDRESS;
+    tbuf[2] = 0x00;
+    tbuf[3] = offset; // offset 00
+    tbuf[4] = postcode;
+    tlen = 5;
+    rlen = 0;
+    ret = bic_ipmb_send(FRU_SLOT1, NETFN_APP_REQ, CMD_APP_MASTER_WRITE_READ, tbuf, tlen, rbuf, &rlen, BB_BIC_INTF);
+    if (ret != 0) {
+      return -1;
+    }
   }
-  if (fd > 0) {
-    close(fd);
+  else {
+    fd = open("/dev/i2c-12", O_RDWR);
+    if (fd < 0) {
+      syslog(LOG_WARNING, "Failed to open bus 12");
+      return -1;
+    }
+
+    switch (uart_select) {
+      case 1:
+        offset = SLOT1_POSTCODE_OFFSET;
+        break;
+      case 2:
+        offset = SLOT2_POSTCODE_OFFSET;
+        break;
+      case 3:
+        offset = SLOT3_POSTCODE_OFFSET;
+        break;
+      case 4:
+        offset = SLOT4_POSTCODE_OFFSET;
+        break;
+    }
+
+    tbuf[0] = offset;
+    tbuf[1] = postcode;
+    tlen = 2;
+    rlen = 0;
+    while (ret < 0 && retry-- > 0) {
+      ret = i2c_rdwr_msg_transfer(fd, CPLD_ADDRESS, tbuf, tlen, rbuf, rlen);
+    }
+    if (fd > 0) {
+      close(fd);
+    }
   }
 
   return ret;
@@ -2461,8 +2821,6 @@ static int
 pal_bic_sel_handler(uint8_t fru, uint8_t snr_num, uint8_t *event_data) {
   int ret = PAL_EOK;
   bool is_cri_sel = false;
-  struct timespec ts;
-  char val[MAX_VALUE_LEN] = {0};
 
   switch (snr_num) {
     case CATERR_B:
@@ -2475,7 +2833,9 @@ pal_bic_sel_handler(uint8_t fru, uint8_t snr_num, uint8_t *event_data) {
       break;
     case BIC_SENSOR_SYSTEM_STATUS:
       switch(event_data[3]) {
-        case 0x14: //SYS_FAN_SERVICE
+        // it's not the fault event, filter it
+        // or the amber LED will blink
+        case 0x80: //E1S_1OU_M2_PRESENT
         case 0x11: //SYS_SLOT_PRSNT
         case 0x0B: //SYS_M2_VPP
         case 0x07: //SYS_FW_TRIGGER
@@ -2491,37 +2851,6 @@ pal_bic_sel_handler(uint8_t fru, uint8_t snr_num, uint8_t *event_data) {
           syslog(LOG_WARNING, "%s() can not reload setup-fan.sh", __func__);
           return -1;
         }
-      } else if (event_data[3] == SYS_FAN_EVENT) {
-        bic_ack_sel(event_data[3]);
-        if (pal_is_fw_update_ongoing(fru) == true) {
-          return PAL_EOK;
-        }
-        // start/stop fscd according fan mode change
-        fby3_common_service_ctrl("fscd", event_data[DATA_INDEX_2]);
-      } else if (event_data[3] == SYS_BB_FW_UPDATE) {
-        bic_ack_sel(event_data[3]);
-        if (event_data[2] == SEL_ASSERT) {
-          if (event_data[4] == FW_BB_BIC) {
-            kv_set("bb_fw_update", "bic", 0, 0);
-          } else if (event_data[4] == FW_BB_BIC_BOOTLOADER) {
-            kv_set("bb_fw_update", "bootloader", 0, 0);
-          } else if (event_data[4] == FW_BB_CPLD) {
-            kv_set("bb_fw_update", "cpld", 0, 0);
-          } else {
-            kv_set("bb_fw_update", "unknown", 0, 0);
-          }
-          fby3_common_service_ctrl("sensord", SV_STOP);
-        } else if (event_data[2] == SEL_DEASSERT) {
-          // if BB fw update complete, delete the key
-          kv_del("bb_fw_update", 0);
-          fby3_common_service_ctrl("sensord", SV_START);
-        }
-        
-        return PAL_EOK;
-      } else if (event_data[3] == SYS_SEL_ACK){
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        snprintf(val, sizeof(val), "%ld", ts.tv_sec);
-        kv_set("peer_bmc_ack_time", val, 0, 0);
       }
       break;
   }
@@ -2565,7 +2894,15 @@ int
 pal_get_num_devs(uint8_t slot, uint8_t *num) {
 
   if (fby3_common_check_slot_id(slot) == 0) {
+    if (pal_is_cwc() == PAL_EOK) {
+      *num = MAX_NUM_DEVS_CWC - 1;
+    } else {
       *num = MAX_NUM_DEVS - 1;
+    }
+  } else if (pal_is_cwc() == PAL_EOK && (slot == FRU_2U_TOP || slot == FRU_2U_BOT)) {
+    return fby3_common_exp_get_num_devs(slot, num);
+  } else {
+    *num = 0;
   }
 
   return 0;
@@ -2588,6 +2925,10 @@ pal_get_dev_fruid_name(uint8_t fru, uint8_t dev, char *name)
     case FRU_SLOT4:
       fby3_common_dev_name(dev, dev_name);
       break;
+    case FRU_2U_TOP:
+    case FRU_2U_BOT:
+      fby3_common_exp_dev_name(dev, dev_name);
+      break;
     default:
       return -1;
   }
@@ -2606,6 +2947,14 @@ pal_get_dev_name(uint8_t fru, uint8_t dev, char *name)
     case FRU_SLOT3:
     case FRU_SLOT4:
       fby3_common_dev_name(dev, name);
+      break;
+    case FRU_2U_TOP:
+    case FRU_2U_BOT:
+      if (pal_is_cwc() == PAL_EOK) {
+        fby3_common_exp_dev_name(dev, name);
+      } else {
+        return -1;
+      }
       break;
     default:
       return -1;
@@ -2638,6 +2987,46 @@ pal_handle_dcmi(uint8_t fru, uint8_t *request, uint8_t req_len, uint8_t *respons
   return 0;
 }
 
+// only for class 2
+static int
+pal_init_fan_mode(uint8_t ctrl_mode) {
+#define FAN_MANUAL 3
+#define FAN_AUTO   6
+  int ret = PAL_ENOTSUP;
+  uint8_t low_time = 0;
+
+  // assign low_time
+  if ( AUTO_MODE == ctrl_mode ) low_time = FAN_AUTO;
+  else if ( MANUAL_MODE == ctrl_mode ) low_time = FAN_MANUAL;
+  else {
+    printf("it's not supported, ctrl_mode = %02X\n", ctrl_mode);
+    return ret;
+  }
+
+  // set crit_act bit and then sleep
+  ret = bic_set_crit_act_flag(SEL_ASSERT);
+  if ( ret < 0 ) {
+    // if we cant notify the other BMC, force to run the mode
+    // because it's just a notification
+    syslog(LOG_WARNING, "Failed to assert crit_act bit");
+  } else {
+    printf("Setup fan mode control...\n");
+    // if we want to do something before sleeping, put here
+    sleep (low_time);
+  }
+
+  // recover the flag
+  if ( ret == PAL_EOK ) {
+    ret = bic_set_crit_act_flag(SEL_DEASSERT);
+    if ( ret < 0 ) {
+      syslog(LOG_WARNING, "Failed to deassert crit_act bit");
+    }
+    sleep(2); // need to wait for gpiod to be ready
+  }
+
+  return ret;
+}
+
 int
 pal_set_fan_ctrl (char *ctrl_opt) {
   FILE* fp = NULL;
@@ -2653,30 +3042,50 @@ pal_set_fan_ctrl (char *ctrl_opt) {
     return ret;
   }
 
-  if (!strcmp(ctrl_opt, ENABLE_STR)) {
-    ctrl_mode = AUTO_MODE;
-    snprintf(cmd, sizeof(cmd), "sv start fscd > /dev/null 2>&1");
-  } else if (!strcmp(ctrl_opt, DISABLE_STR)) {
-    ctrl_mode = MANUAL_MODE;
-    snprintf(cmd, sizeof(cmd), "sv force-stop fscd > /dev/null 2>&1");
-  } else if (!strcmp(ctrl_opt, STATUS_STR)) {
-    ctrl_mode = GET_FAN_MODE;
-  } else {
+  // get the option
+  if (!strcmp(ctrl_opt, ENABLE_STR)) ctrl_mode = AUTO_MODE;
+  else if (!strcmp(ctrl_opt, DISABLE_STR)) ctrl_mode = MANUAL_MODE;
+  else if (!strcmp(ctrl_opt, STATUS_STR)) ctrl_mode = GET_FAN_MODE;
+  else if (!strcmp(ctrl_opt, WAKEUP_STR)) ctrl_mode = WAKEUP_MODE;
+  else if (!strcmp(ctrl_opt, SLEEP_STR))  ctrl_mode = SLEEP_MODE;
+  else {
+    syslog(LOG_WARNING, "%s() it's not supported, ctrl_opt=%s\n", __func__, ctrl_opt);
     return -1;
   }
 
-  // notify baseboard bic and another slot BMC (Class 2)
-  if (bmc_location == NIC_BMC) {
-    // get/set fan status
-    if ( bic_set_fan_auto_mode(ctrl_mode, &status) < 0 ) {
-      syslog(LOG_WARNING, "%s() Failed to call bic_set_fan_auto_mode. ctrl_mode=%02X", __func__, ctrl_mode);
-      return -1;
-    }
+  // assign the command if needed
+  switch (ctrl_mode) {
+    case AUTO_MODE:
+    case WAKEUP_MODE:
+      snprintf(cmd, sizeof(cmd), "sv start fscd > /dev/null 2>&1");
+      break;
+    case MANUAL_MODE:
+    case SLEEP_MODE:
+      snprintf(cmd, sizeof(cmd), "sv force-stop fscd > /dev/null 2>&1");
+      break;
+  }
 
-    // notify the other BMC except for getting fan mode
-    if ( ctrl_mode != GET_FAN_MODE && (bic_notify_fan_mode(ctrl_mode) < 0) ) {
-      syslog(LOG_WARNING, "%s() Failed to call bic_notify_fan_mode. ctrl_mode=%02X", __func__, ctrl_mode);
-      return -1;
+  // special fan case for class 2
+  if (bmc_location == NIC_BMC) {
+    // use WAKEUP_MODE/SLEEP_MODE to skip the above code, adjust it back
+    // so we can use the original logic to start fscd
+    if ( ctrl_mode == WAKEUP_MODE || ctrl_mode == SLEEP_MODE ) {
+      ctrl_mode = (ctrl_mode == WAKEUP_MODE)?AUTO_MODE:MANUAL_MODE;
+    } else {
+      // notify the other BMC except for getting fan mode
+      if ( (pal_is_cwc() != PAL_EOK) && (ctrl_mode != GET_FAN_MODE) && (pal_init_fan_mode(ctrl_mode) < 0) ) {
+        syslog(LOG_WARNING, "%s() Failed to call pal_init_fan_mode. ctrl_mode=%02X", __func__, ctrl_mode);
+        return -1;
+      }
+
+      // get/set/ fan mode
+      if ( bic_set_fan_auto_mode(ctrl_mode, &status) < 0 ) {
+        syslog(LOG_WARNING, "%s() Failed to call bic_set_fan_auto_mode. ctrl_mode=%02X", __func__, ctrl_mode);
+        return -1;
+      } else {
+        // set the flag by itself, so it can handle requests from the other BMC
+        kv_set("fan_manual", (ctrl_mode == AUTO_MODE)?"0":"1", 0, 0);
+      }
     }
   }
 
@@ -2727,7 +3136,6 @@ pal_set_fan_ctrl (char *ctrl_opt) {
         if(ret != 0) return ret;
       }
     }
-
   }
 
   return ret;
@@ -3457,11 +3865,90 @@ error_exit:
   return ret;
 }
 
+static int
+pal_get_cpld_ver(uint8_t fru, uint8_t* data_buf, uint8_t* data_len) {
+  int ret = 0;
+  const uint8_t cpld_addr = 0x80;
+  uint8_t tbuf[4] = {0x00, 0x20, 0x00, 0x28};
+  uint8_t rbuf[4] = {0x00};
+  uint8_t tlen = 4;
+  uint8_t rlen = 4;
+  uint8_t i2c_bus = 0;
+  int i2cfd = 0;
+
+  switch (fru){
+  case FRU_SLOT1:
+  case FRU_SLOT2:
+  case FRU_SLOT3:
+  case FRU_SLOT4:
+    i2c_bus = fby3_common_get_bus_id(fru) + 4;
+    break;
+  case FRU_BB:
+    i2c_bus = 12;
+    break;
+  default:
+    return -1;
+  }
+
+  ret = i2c_cdev_slave_open(i2c_bus, cpld_addr >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "Failed to open bus 12");
+    return -1;
+  }
+  i2cfd = ret;
+  ret = i2c_rdwr_msg_transfer(i2cfd, cpld_addr, tbuf, tlen, rbuf, rlen);
+  if ( i2cfd > 0 )
+    close(i2cfd);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer to slave@0x%02X on bus %d", __func__, cpld_addr, i2c_bus);
+    return -1;
+  }
+
+  memcpy(data_buf, rbuf, rlen);
+  if (data_len != NULL) {
+    *data_len = rlen;
+  }
+
+  return 0;
+}
+
+int
+pal_get_bb_fw_info(unsigned char target, char* ver_str) {
+  char key[MAX_KEY_LEN] = {0};
+  char value[MAX_VALUE_LEN] = {0};
+
+  if (target == FW_CPLD) {
+    uint8_t data_buf[4] = {0};
+    uint8_t data_len;
+
+    sprintf(key, "bb_cpld_ver");
+    // kv cache exist
+    if (kv_get(key, value, NULL, 0) == 0) {
+      memcpy(ver_str, value, 8);
+      return 0;
+    }
+
+    // get version by i2c
+    if (pal_get_cpld_ver(FRU_BB, data_buf, &data_len) < 0) {
+      return -1;
+    }
+
+    // write cache
+    sprintf(value, "%02X%02X%02X%02X", data_buf[3], data_buf[2], data_buf[1], data_buf[0]);
+    kv_set(key, value, 8, 0);
+    memcpy(ver_str, value, 8);
+    return 0;
+  }
+
+  // unsupported target
+  return -1;
+}
+
 int
 pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned char* res_len)
 {
   uint8_t bmc_location = 0;
-  uint8_t config_status = CONFIG_UNKNOWN ;
+  uint8_t config_status;
   int ret = PAL_ENOTSUP;
   uint8_t tmp_cpld_swap[4] = {0};
   uint8_t type_2ou = UNKNOWN_BOARD;
@@ -3473,24 +3960,8 @@ pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned 
   }
 
   if (target == FW_CPLD) {
-    const uint8_t cpld_addr = 0x80; /*8-bit addr*/
-    uint8_t tbuf[4] = {0x00, 0x20, 0x00, 0x28};
-    uint8_t tlen = 4;
-    uint8_t rlen = 4;
-    uint8_t i2c_bus = fby3_common_get_bus_id(fru) + 4;
-    int i2cfd = -1;
-    ret = i2c_cdev_slave_open(i2c_bus, cpld_addr >> 1, I2C_SLAVE_FORCE_CLAIM);
-    if ( ret < 0 ) {
-      syslog(LOG_WARNING, "%s() Failed to talk to slave@0x%02X on bus %d. Err: %s\n", \
-                                          __func__, cpld_addr, i2c_bus, strerror(errno));
-      goto error_exit;
-    }
-
-    i2cfd = ret;
-    ret = i2c_rdwr_msg_transfer(i2cfd, cpld_addr, tbuf, tlen, res, rlen);
-    if ( i2cfd > 0 ) close(i2cfd);
-    if ( ret < 0 ) {
-      syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer to slave@0x%02X on bus %d", __func__, cpld_addr, i2c_bus);
+    ret = pal_get_cpld_ver(fru, res, res_len);
+    if (ret < 0) {
       goto error_exit;
     }
   } else if(target == FW_BIOS) {
@@ -3507,7 +3978,12 @@ pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned 
     case FW_1OU_BIC:
     case FW_1OU_BIC_BOOTLOADER:
     case FW_1OU_CPLD:
-      config_status = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+      ret = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+      if (ret < 0) {
+        syslog(LOG_WARNING, "%s() Failed to get 1ou & 2ou present status", __func__);
+        goto error_exit;
+      }
+      config_status = (uint8_t) ret;
       if (!((bmc_location == BB_BMC || bmc_location == DVT_BB_BMC) && ((config_status & PRESENT_1OU) == PRESENT_1OU))) {
         goto not_support;
       }
@@ -3515,7 +3991,12 @@ pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned 
     case FW_2OU_BIC:
     case FW_2OU_BIC_BOOTLOADER:
     case FW_2OU_CPLD:
-      config_status = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+      ret = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+      if (ret < 0) {
+        syslog(LOG_WARNING, "%s() Failed to get 1ou & 2ou present status", __func__);
+        goto error_exit;
+      }
+      config_status = (uint8_t) ret;
       if ( fby3_common_get_2ou_board_type(fru, &type_2ou) < 0 ) {
         syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
       }
@@ -3850,15 +4331,20 @@ pal_get_sensor_util_timeout(uint8_t fru) {
     case FRU_SLOT2:
     case FRU_SLOT3:
     case FRU_SLOT4:
+    case FRU_2U:
+    case FRU_CWC:
+    case FRU_2U_TOP:
+    case FRU_2U_BOT:
       return 10;
     case FRU_BMC:
+      return 10;
     case FRU_NIC:
     default:
       return 4;
   }
 }
 
-// IPMI OEM Command 
+// IPMI OEM Command
 // netfn: NETFN_OEM_1S_REQ (0x38)
 // command code: CMD_OEM_1S_GET_SYS_FW_VER (0x40)
 int
@@ -3878,21 +4364,21 @@ pal_get_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_
       "/usr/bin/fw-util bmc --version cpld | awk '{print $NF}'",
       "/usr/bin/fw-util bmc --version fscd | awk '{print $NF}'",
       "/usr/bin/fw-util bmc --version tpm | awk '{print $NF}'",
-      NULL, 
-      NULL, 
-      NULL, 
+      NULL,
+      NULL,
+      NULL,
       NULL
     },
     // NIC
     {
       "/usr/bin/fw-util nic --version | awk '{print $NF}'",
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
       NULL
     },
     // Base board
@@ -3901,10 +4387,10 @@ pal_get_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_
       "/usr/bin/fw-util slot1 --version bb_bicbl | awk '{print $NF}'",
       "/usr/bin/fw-util slot1 --version bb_cpld | awk '{print $NF}'",
       NULL,
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
+      NULL,
+      NULL,
+      NULL,
+      NULL,
       NULL
     },
     // Server board
@@ -3923,12 +4409,12 @@ pal_get_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_
     {
       "/usr/bin/fw-util slot1 --version 2ou_bic | awk '{print $NF}'",
       "/usr/bin/fw-util slot1 --version 2ou_bicbl | awk '{print $NF}'",
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
-      NULL, 
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
       NULL
     }
   };
@@ -3984,9 +4470,21 @@ pal_get_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_
 
 int
 pal_gpv3_mux_select(uint8_t slot_id, uint8_t dev_id) {
-  if ( bic_mux_select(slot_id, get_gpv3_bus_number(dev_id), dev_id, REXP_BIC_INTF) < 0 ) {
-    printf("* Failed to select MUX\n");
-    return BIC_STATUS_FAILURE;
+  if ( slot_id == FRU_2U_TOP ) {
+    if ( bic_mux_select(FRU_SLOT1, get_gpv3_bus_number(dev_id), dev_id, RREXP_BIC_INTF1) < 0 ) {
+      printf("* Failed to select MUX from top GPV3\n");
+      return BIC_STATUS_FAILURE;
+    }
+  } else if ( slot_id == FRU_2U_BOT ) {
+    if ( bic_mux_select(FRU_SLOT1, get_gpv3_bus_number(dev_id), dev_id, RREXP_BIC_INTF2) < 0 ) {
+      printf("* Failed to select MUX from bot GPV3\n");
+      return BIC_STATUS_FAILURE;
+    }
+  } else {
+    if ( bic_mux_select(slot_id, get_gpv3_bus_number(dev_id), dev_id, REXP_BIC_INTF) < 0 ) {
+      printf("* Failed to select MUX\n");
+      return BIC_STATUS_FAILURE;
+    }
   }
   return BIC_STATUS_SUCCESS;
 }
@@ -4017,104 +4515,81 @@ pal_is_aggregate_snr_valid(uint8_t snr_num) {
   return true;
 }
 
-int pal_preprocess_before_updating_fw(uint8_t slot_id) {
-#define FW_UPDATE_FAN_PWM  70
-#define FAN_PWM_CNT        4
+int pal_dp_hba_fan_table_check(void) {
+  //DP only slot1
+  uint8_t slot = FRU_SLOT1;
+  int ret = 0, config_status = 0;
   uint8_t bmc_location = 0;
-  uint8_t status = 0;
-  int ret = fby3_common_get_bmc_location(&bmc_location);
+  uint8_t type_2ou = UNKNOWN_BOARD;
+  uint8_t tbuf[16] = {0xb8, 0x40, 0x57, 0x01 ,0x00 ,0x30 ,0x06 ,0x05 ,0x61 ,0x00 ,0x00 ,0x00 ,0x60 ,0x01};
+  uint8_t rbuf[10] = {0x00};
+  uint8_t tlen = 14;
+  uint8_t rlen = 10;
+  uint16_t read_vid = 0x0, read_did = 0x0;
+  char cmd[64] = {0};
+
+  ret = fby3_common_get_bmc_location(&bmc_location);
   if (ret < 0) {
-    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
-    return PAL_ENOTSUP;
+    syslog(LOG_ERR, "%s() Cannot get the location of BMC", __func__);
+    return -1;
   }
 
-  if ( bmc_location != NIC_BMC ) return PAL_EOK;
-
-  ret = PAL_EOK;
-  do {
-    // stop running sensord
-    if ( (ret = fby3_common_service_ctrl("sensord", SV_STOP)) < 0 ) {
-      printf("Failed to stop sensord service\n");
-      break;
+  config_status = bic_is_m2_exp_prsnt(slot);
+  if ( (config_status & PRESENT_2OU) == PRESENT_2OU ) {
+    //check if GPv3 is installed
+    if ( fby3_common_get_2ou_board_type(slot, &type_2ou) < 0 ) {
+      syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
     }
+  }
 
-    // stop running fscd
-    if ( (ret = fby3_common_service_ctrl("fscd", SV_STOP)) < 0) {
-      printf("Failed to stop fscd service\n");
-      break;
-    }
+  if ( (bmc_location == BB_BMC) || (bmc_location == DVT_BB_BMC) ) {
+    if (type_2ou == DP_RISER_BOARD) {
+      ret = bic_me_xmit(slot, tbuf, tlen, rbuf, &rlen);
+      if (ret == 0) {
+        read_vid = rbuf[6] << 8 | rbuf[5];
+        read_did = rbuf[8] << 8 | rbuf[7];;
+        if ((read_vid == HBA_VID) && (read_did == HBA_DID)) {
+          snprintf(cmd, sizeof(cmd), "ln -sf %s %s", DP_HBA_FAN_TBL_PATH, DEFAULT_FSC_CFG_PATH);
+          ret = system(cmd);
+          if (ret != 0) {
+            syslog(LOG_WARNING, "%s() can not import DP-HBA fan table", __func__);
+            return ret;
+          }
 
-    // go into the manual mode
-    if ( (ret = bic_set_fan_auto_mode(FAN_MANUAL_MODE, &status)) < 0 ) {
-      printf("Failed to set fan mode to manual\n");
-      break;
-    }
-
-    // send a SEL to the other side of BMC
-    if ( (ret = bic_notify_fan_mode(FAN_MANUAL_MODE)) < 0 ) {
-      printf("Failed to assert fan SEL to the other side of BMC\n");
-      break;
-    }
-
-    // waiting another BMC to stop fscd
-    sleep(3);
-
-    // set PWM to 70% if needed
-    printf("Set fan mode to manual and set PWM to %d%%\n", FW_UPDATE_FAN_PWM);
-    for (int i = 0; i < FAN_PWM_CNT; i++) {
-      if ( (ret = bic_manual_set_fan_speed(i, FW_UPDATE_FAN_PWM)) < 0 ) {
-        printf("Failed to set fan %d PWM to %d\n", i, FW_UPDATE_FAN_PWM);
-        break;
+          ret = system("/usr/bin/sv restart fscd");
+          if (ret != 0) {
+            syslog(LOG_WARNING, "%s() can not restart fscd", __func__);
+            return ret;
+          }
+        }
       }
-      msleep(100);
     }
-
-    if ( (ret = bic_notify_pwr_lock_sel(SEL_ASSERT)) < 0 ) {
-      printf("Failed to assert power lock SEL to the other side of BMC\n");
-      break;
-    }
-  } while(0);
+  }
 
   return ret;
 }
 
-int pal_postprocess_after_updating_fw(uint8_t slot_id) {
-  static bool is_called = false;
-  uint8_t bmc_location = 0;
-  uint8_t status = 0;
+int pal_is_cwc(void) {
+  static uint8_t bmc_location = UNKNOWN_BOARD;
+  static uint8_t board_type = UNKNOWN_BOARD;
 
-  // the deconstructor in fw-util(system.cpp) will call set_update_ongoing twice
-  // add a flag to avoid running it again
-  if ( is_called == true ) return PAL_EOK;
+  if (board_type == UNKNOWN_BOARD) {
+    if (fby3_common_get_bmc_location(&bmc_location) < 0) {
+      syslog(LOG_ERR, "%s() Cannot get the location of BMC", __func__);
+      return PAL_ENOTSUP;
+    }
 
-  int ret = fby3_common_get_bmc_location(&bmc_location);
-  if (ret < 0) {
-    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
-    return PAL_ENOTSUP;
+    if ( bmc_location == NIC_BMC ) {
+      if (fby3_common_get_2ou_board_type(FRU_SLOT1, &board_type) < 0) {
+        syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
+        return PAL_ENOTSUP;
+      }
+    }
   }
 
-  if ( bmc_location != NIC_BMC ) return PAL_EOK;
+  return board_type == CWC_MCHP_BOARD ? PAL_EOK : PAL_ENOTSUP;
+}
 
-  if ( (ret = bic_set_fan_auto_mode(FAN_AUTO_MODE, &status)) < 0 ) {
-    printf("Failed to set fan mode to auto\n");
-  }
-
-  if ( (ret = bic_notify_fan_mode(FAN_AUTO_MODE)) < 0 ) {
-    printf("Failed to de-assert fan SEL to the other side of BMC\n");
-  }
-
-  if ( (ret = fby3_common_service_ctrl("sensord", SV_START)) < 0) {
-    printf("Failed to start sensord service, please start fscd manually.\nCommand: sv start sensord\n");
-  }
-
-  if ( (ret = fby3_common_service_ctrl("fscd", SV_START)) < 0 ) {
-    printf("Failed to start fscd service, please start fscd manually.\nCommand: sv start fscd\n");
-  }
-
-  if ( (ret = bic_notify_pwr_lock_sel(SEL_DEASSERT)) < 0 ) {
-    printf("Failed to de-assert power lock SEL to the other side of BMC\n");
-  }
-
-  is_called = true;
-  return ret;
+int pal_get_cwc_id(char *str, uint8_t *fru) {
+  return fby3_common_get_exp_id(str, fru) == 0 ? PAL_EOK : PAL_ENOTSUP;
 }

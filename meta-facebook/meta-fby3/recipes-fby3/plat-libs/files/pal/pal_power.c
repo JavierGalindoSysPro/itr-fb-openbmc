@@ -16,6 +16,12 @@
 #define CPLD_PWR_CTRL_BUS 12
 #define CPLD_PWR_CTRL_ADDR 0x1F
 
+#define REG_CWC_CPLD_CWC_HSC 0x01
+#define REG_CWC_CPLD_GPV3_HSC 0x02
+#define REG_CWC_CPLD_CARD_PWROK 0x0C
+#define DELAY_POWER_CYCLE 5 //sec
+#define MAX_POWER_CYCLE_DWELL 20  //sec
+
 enum {
   POWER_STATUS_ALREADY_OK = 1,
   POWER_STATUS_OK = 0,
@@ -41,9 +47,6 @@ server_power_off(uint8_t fru) {
     syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
     return POWER_STATUS_ERR;
   }
-  if ( bmc_location == NIC_BMC ) {
-    if ( pal_set_nic_perst(fru, NIC_PE_RST_LOW) < 0 ) return POWER_STATUS_ERR;
-  }
   return bic_server_power_off(fru);
 }
 
@@ -57,9 +60,6 @@ server_power_on(uint8_t fru) {
   if ( ret < 0 ) {
     syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
     return POWER_STATUS_ERR;
-  }
-  if ( bmc_location == NIC_BMC ) {
-    if ( pal_set_nic_perst(fru, NIC_PE_RST_HIGH) < 0 ) return POWER_STATUS_ERR;
   }
   return bic_server_power_on(fru);
 }
@@ -137,14 +137,6 @@ server_power_12v_on(uint8_t fru) {
 
   sleep(1);
 
-  snprintf(cmd, sizeof(cmd), "sv start ipmbd_%d > /dev/null 2>&1", fby3_common_get_bus_id(fru));
-  if (system(cmd) != 0) {
-    syslog(LOG_WARNING, "[%s] %s failed\n", __func__, cmd);
-    ret = PAL_ENOTSUP;
-    goto error_exit;
-  }
-  sleep(2);
-
   // vr cached info was removed when 12v_off was performed
   // we generate it again to avoid accessing VR devices at the same time.
   snprintf(cmd, sizeof(cmd), "/usr/bin/fw-util slot%d --version vr > /dev/null 2>&1", fru);
@@ -183,13 +175,6 @@ server_power_12v_off(uint8_t fru) {
   snprintf(cmd, 64, "rm -f /tmp/cache_store/slot%d_vr*", fru);
   if (system(cmd) != 0) {
       syslog(LOG_WARNING, "[%s] %s failed\n", __func__, cmd);
-  }
-
-  snprintf(cmd, sizeof(cmd), "sv stop ipmbd_%d > /dev/null 2>&1", fby3_common_get_bus_id(fru));
-  if (system(cmd) != 0) {
-      syslog(LOG_WARNING, "[%s] %s failed\n", __func__, cmd);
-      ret = PAL_ENOTSUP;
-      goto error_exit;
   }
 
   ret = fby3_common_set_fru_i2c_isolated(fru, GPIO_VALUE_LOW);
@@ -454,6 +439,10 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
           }
         }
       } else {
+        if ((bmc_location == NIC_BMC) && (true == pal_is_fw_update_ongoing_system()) ) {
+          printf("Please make sure no firmware update is ongoing\n");
+          return POWER_STATUS_ERR;
+        }
         if ( bic_do_12V_cycle(fru) < 0 ) {
           return POWER_STATUS_ERR;
         }
@@ -483,11 +472,11 @@ pal_sled_cycle(void) {
   if ( (bmc_location == BB_BMC) || (bmc_location == DVT_BB_BMC) ) {
     ret = system("i2cset -y 11 0x40 0xd9 c &> /dev/null");
   } else {
-    uint8_t is_pwr_lock = 0;
     // check power lock flag
-    if ( (ret = bic_get_pwr_lock_flag(&is_pwr_lock)) < 0 || is_pwr_lock > 0 ) {
+    if ( bic_is_crit_act_ongoing(FRU_SLOT1) == true ) {
       printf("power lock flag is asserted, please make sure no firmware update is ongoing\n");
-      printf("If you still want to proceed, please clean the flag manually! ret=%d, lock=%d\n", ret, is_pwr_lock);
+      printf("If you still want to proceed, please clean the flag manually!\n");
+      syslog(LOG_CRIT, "SLED_CYCLE failed because a critical activity is ongoing\n");
       return PAL_ENOTSUP;
     }
 
@@ -588,6 +577,16 @@ pal_is_valid_expansion_dev(uint8_t slot_id, uint8_t dev_id, uint8_t *rsp) {
     }
     rsp[0] = dev_id - 4;
     rsp[1] = REXP_BIC_INTF;
+  } else if (( dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) && ((config_status & PRESENT_2OU) == PRESENT_2OU)) {
+    uint8_t type = 0xff;
+    if ( fby3_common_get_2ou_board_type(slot_id, &type) < 0 ) {
+      return POWER_STATUS_FRU_ERR;
+    } else if ( type != GPV3_MCHP_BOARD && type != GPV3_BRCM_BOARD ) {
+      //If dev doesn't belong to GPv3, return
+      if ( dev_id > end_2ou_yv3_idx ) return POWER_STATUS_FRU_ERR;
+    }
+    rsp[0] = dev_id;
+    rsp[1] = REXP_BIC_INTF;
   } else {
     // dev not found
     return POWER_STATUS_FRU_ERR;
@@ -597,11 +596,103 @@ pal_is_valid_expansion_dev(uint8_t slot_id, uint8_t dev_id, uint8_t *rsp) {
 }
 
 int
+pal_get_exp_device_power(uint8_t exp, uint8_t dev_id, uint8_t *status, uint8_t *type) {
+  uint8_t sta = 0;
+  int ret = 0;
+  uint8_t nvme_ready = 0;
+  uint8_t intf = 0;
+
+  if (pal_get_exp_power(exp, &sta)) {
+    return POWER_STATUS_ERR;
+  }
+
+  if (sta == SERVER_12V_OFF) {
+    *status = DEVICE_POWER_OFF;
+    syslog(LOG_WARNING, "pal_get_exp_device_power: pal_get_exp_power 12V-off");
+    return 0;
+  }
+
+  switch (exp) {
+    case FRU_2U_TOP:
+      if (dev_id >= DEV_ID0_2OU && dev_id <= DEV_ID13_2OU) {
+        dev_id -= 4;
+        intf = RREXP_BIC_INTF1;
+      } else if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+        intf = RREXP_BIC_INTF1;
+      } else {
+        printf("Device not found \n");
+        return POWER_STATUS_FRU_ERR;
+      }
+      break;
+    case FRU_2U_BOT:
+      if (dev_id >= DEV_ID0_2OU && dev_id <= DEV_ID13_2OU) {
+        dev_id -= 4;
+        intf = RREXP_BIC_INTF2;
+      } else if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+        intf = RREXP_BIC_INTF2;
+      } else {
+        printf("Device not found \n");
+        return POWER_STATUS_FRU_ERR;
+      }
+      break;
+
+    default:
+      return POWER_STATUS_FRU_ERR;
+  }
+
+  ret = bic_get_dev_power_status(FRU_SLOT1, dev_id, &nvme_ready, status, \
+                                  NULL, NULL, NULL, NULL, NULL, intf);
+  if (ret < 0) {
+    return -1;
+  }
+
+  if (nvme_ready) {
+    *type = DEV_TYPE_M2;
+  } else {
+    *type = DEV_TYPE_UNKNOWN;
+  }
+
+  return 0;
+}
+
+int
+pal_get_dual_power(uint8_t slot_id, uint8_t dev_id, uint8_t *status, uint8_t *type) {
+  uint8_t dev0 = DEV_ID0_2OU + (dev_id - DUAL_DEV_ID0_2OU) * 2;
+  uint8_t dev1 = DEV_ID0_2OU + (dev_id - DUAL_DEV_ID0_2OU) * 2 + 1;
+
+  if (pal_get_device_power(slot_id, dev0, &status[0], type) < 0) {
+      return -1;
+  }
+  if (pal_get_device_power(slot_id, dev1, &status[1], type) < 0) {
+      return -1;
+  }
+  
+  return 0;
+}
+
+int
 pal_get_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t *status, uint8_t *type) {
   int ret = 0;
   uint8_t nvme_ready = 0;
   uint8_t intf = 0;
   uint8_t rsp[2] = {0}; //idx0 = dev id, idx1 = intf
+
+  if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+    uint8_t dual_sta[2] = {0};
+    if (pal_get_dual_power(slot_id, dev_id, dual_sta, type)) {
+      return POWER_STATUS_ERR;
+    }
+    if (dual_sta[0] == DEVICE_POWER_ON && dual_sta[1] == DEVICE_POWER_ON) {
+      *status = DEVICE_POWER_ON;
+    } else {
+      *status = DEVICE_POWER_OFF;
+    }
+    return 0;
+  }
+
+  if (pal_is_cwc() == PAL_EOK && (slot_id == FRU_2U_TOP || slot_id == FRU_2U_BOT)) {
+    return pal_get_exp_device_power(slot_id, dev_id, status, type);
+  }
 
   if (fby3_common_check_slot_id(slot_id) == 0) {
     /* Check whether the system is 12V off or on */
@@ -643,19 +734,134 @@ pal_get_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t *status, uint8_t *
 }
 
 int
+pal_set_exp_device_power(uint8_t exp, uint8_t dev_id, uint8_t cmd) {
+  uint8_t sta[2] = {0}, type = 0;
+  int ret = 0;
+  uint8_t intf = 0;
+
+  if (pal_get_exp_power(exp, sta)) {
+    return POWER_STATUS_ERR;
+  }
+
+  if (sta[0] == SERVER_12V_OFF) {
+    printf("Fru:%d is off \n", exp);
+    return 0;
+  }
+
+  if (pal_get_exp_device_power(exp, dev_id, sta, &type)) {
+    return POWER_STATUS_ERR;
+  }
+
+  switch (exp) {
+    case FRU_2U_TOP:
+      if (dev_id >= DEV_ID0_2OU && dev_id <= DEV_ID13_2OU) {
+        dev_id -= 4;
+        intf = RREXP_BIC_INTF1;
+      } else if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+        intf = RREXP_BIC_INTF1;
+      } else {
+        printf("Device not found \n");
+        return POWER_STATUS_FRU_ERR;
+      }
+      break;
+    case FRU_2U_BOT:
+      if (dev_id >= DEV_ID0_2OU && dev_id <= DEV_ID13_2OU) {
+        dev_id -= 4;
+        intf = RREXP_BIC_INTF2;
+      } else if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+        intf = RREXP_BIC_INTF2;
+      } else {
+        printf("Device not found \n");
+        return POWER_STATUS_FRU_ERR;
+      }
+      break;
+
+    default:
+      return POWER_STATUS_FRU_ERR;
+  }
+
+  if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+    if (cmd == SERVER_POWER_ON) {
+      if (sta[0] == DEVICE_POWER_ON && sta[1] == DEVICE_POWER_ON) {
+        sta[0] = DEVICE_POWER_ON;
+      } else {
+        sta[0] = DEVICE_POWER_OFF;
+      }
+    } else {  //off or cycle
+      if (sta[0] == DEVICE_POWER_OFF && sta[1] == DEVICE_POWER_OFF) {
+        sta[0] = DEVICE_POWER_OFF;
+      } else {
+        sta[0] = DEVICE_POWER_ON;
+      }
+    }
+  }
+
+  switch(cmd) {
+    case SERVER_POWER_ON:
+      if (sta[0] == DEVICE_POWER_ON) {
+        return 1;
+      } else {
+        ret = bic_set_dev_power_status(FRU_SLOT1, dev_id, DEVICE_POWER_ON, intf);
+        return ret;
+      }
+      break;
+
+    case SERVER_POWER_OFF:
+      if (sta[0] == DEVICE_POWER_OFF) {
+        return 1;
+      } else {
+        ret = bic_set_dev_power_status(FRU_SLOT1, dev_id, DEVICE_POWER_OFF, intf);
+        return ret;
+      }
+      break;
+    case SERVER_POWER_CYCLE:
+      if (sta[0] == DEVICE_POWER_ON) {
+        ret = bic_set_dev_power_status(FRU_SLOT1, dev_id, DEVICE_POWER_OFF, intf);
+        if (ret < 0) {
+          return -1;
+        }
+
+        sleep(3);
+
+        ret = bic_set_dev_power_status(FRU_SLOT1, dev_id, DEVICE_POWER_ON, intf);
+        return ret;
+      } else if (sta[0] == DEVICE_POWER_OFF) {
+        ret = bic_set_dev_power_status(FRU_SLOT1, dev_id, DEVICE_POWER_ON, intf);
+        return ret;
+      }
+      break;
+
+    default:
+      return POWER_STATUS_ERR;
+  }
+
+  return 0;
+}
+
+int
 pal_set_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t cmd) {
   int ret;
   uint8_t status, type, type_1ou = 0;
   uint8_t intf = 0;
   uint8_t rsp[2] = {0}; //idx0 = dev id, idx1 = intf
+  uint8_t dual_sta[2] = {0};
+
+  if (pal_is_cwc() == PAL_EOK && (slot_id == FRU_2U_TOP || slot_id == FRU_2U_BOT)) {
+    return pal_set_exp_device_power(slot_id, dev_id, cmd);
+  }
 
   ret = fby3_common_check_slot_id(slot_id);
   if ( ret < 0 ) {
     return POWER_STATUS_FRU_ERR;
   }
-
-  if (pal_get_device_power(slot_id, dev_id, &status, &type) < 0) {
-    return -1;
+  if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+    if (pal_get_dual_power(slot_id, dev_id, dual_sta, &type) < 0) {
+      return -1;
+    }
+  } else {
+    if (pal_get_device_power(slot_id, dev_id, &status, &type) < 0) {
+      return -1;
+    }
   }
 
   if ( pal_is_valid_expansion_dev(slot_id, dev_id, rsp) < 0 ) {
@@ -665,6 +871,22 @@ pal_set_device_power(uint8_t slot_id, uint8_t dev_id, uint8_t cmd) {
 
   dev_id = rsp[0];
   intf = rsp[1];
+
+  if (dev_id >= DUAL_DEV_ID0_2OU && dev_id <= DUAL_DEV_ID5_2OU) {
+    if (cmd == SERVER_POWER_ON) {
+      if (dual_sta[0] == DEVICE_POWER_ON && dual_sta[1] == DEVICE_POWER_ON) {
+        status = DEVICE_POWER_ON;
+      } else {
+        status = DEVICE_POWER_OFF;
+      }
+    } else {  //off or cycle
+      if (dual_sta[0] == DEVICE_POWER_OFF && dual_sta[1] == DEVICE_POWER_OFF) {
+        status = DEVICE_POWER_OFF;
+      } else {
+        status = DEVICE_POWER_ON;
+      }
+    }
+  }
 
   switch(cmd) {
     case SERVER_POWER_ON:
@@ -721,8 +943,19 @@ pal_get_chassis_status(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8
   char key[MAX_KEY_LEN];
   char buff[MAX_VALUE_LEN] = {0};
   int policy = 3;
-  uint8_t status, ret;
+  int ret = 0;
+  uint8_t status = 0;
+  uint8_t uart_select = 0x00;
   unsigned char *data = res_data;
+
+  if(slot == 5) {   //handle the case, command sent from debug Card
+    ret = pal_get_uart_select_from_kv(&uart_select);
+    if (ret < 0) {
+      syslog(LOG_WARNING, "%s() Failed to get debug_card_uart_select\n", __func__);
+    }
+    // if uart_select is BMC, the following code will return default data.
+    slot = uart_select;
+  }
 
   sprintf(key, "slot%u_por_cfg", slot);
   if (pal_get_key_value(key, buff) == 0) {
@@ -923,4 +1156,263 @@ pal_sled_ac_cycle(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res
   }
 
   return comp_code;
+}
+
+int
+pal_get_exp_power(uint8_t fru, uint8_t *status) {
+  int i2cfd = BIC_STATUS_FAILURE;
+  int ret = BIC_STATUS_FAILURE;
+  int bus = 0;
+  uint8_t tbuf = 0x0;
+  uint8_t rbuf = 0x0;
+  uint8_t tlen = 0x0;
+  uint8_t rlen = 0x0;
+  uint8_t retry = MAX_READ_RETRY;
+  uint8_t mask = 0;
+
+  switch (fru) {
+    case FRU_CWC:
+      bus = FRU_SLOT1 + SLOT_BUS_BASE;
+      mask = 0x01;
+      break;
+    case FRU_2U_TOP:
+      bus = FRU_SLOT1 + SLOT_BUS_BASE;
+      mask = 0x02;
+      break;
+    case FRU_2U_BOT:
+      bus = FRU_SLOT1 + SLOT_BUS_BASE;
+      mask = 0x04;
+      break;
+    default:
+      printf("unknown expantion fru : %d\n", fru);
+      return POWER_STATUS_FRU_ERR;
+  }
+
+  i2cfd = i2c_cdev_slave_open(bus, CWC_CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if ( i2cfd < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to open i2c device %d", __func__, CWC_CPLD_ADDRESS);
+    return i2cfd;
+  }
+
+  tbuf = REG_CWC_CPLD_CARD_PWROK;
+  tlen = 1;
+  rlen = 1;
+  do {
+    ret = i2c_rdwr_msg_transfer(i2cfd, CWC_CPLD_ADDRESS, &tbuf, tlen, &rbuf, rlen);
+    if ( ret < 0 ) {
+      msleep(100);
+    } else {
+      break;
+    }
+  } while( retry-- > 0 );
+
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer, tlen=%d", __func__, tlen);
+  } else {
+    if ( rbuf & mask ) {
+      *status = SERVER_12V_ON;
+    } else {
+      *status = SERVER_12V_OFF;
+    }
+  }
+
+  if ( i2cfd > 0 ) {
+    close(i2cfd);
+  }
+  return ret;
+}
+
+int
+pal_get_gpv3_hsc(int bus, uint8_t *val) {
+  int i2cfd = BIC_STATUS_FAILURE;
+  int ret = BIC_STATUS_FAILURE;
+  uint8_t tbuf = 0x0;
+  uint8_t rbuf = 0x0;
+  uint8_t tlen = 0x0;
+  uint8_t rlen = 0x0;
+  uint8_t retry = MAX_READ_RETRY;
+
+  i2cfd = i2c_cdev_slave_open(bus, CWC_CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if ( i2cfd < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to open i2c device %d", __func__, CWC_CPLD_ADDRESS);
+    return i2cfd;
+  }
+
+  tbuf = REG_CWC_CPLD_GPV3_HSC;
+  tlen = 1;
+  rlen = 1;
+  do {
+    ret = i2c_rdwr_msg_transfer(i2cfd, CWC_CPLD_ADDRESS, &tbuf, tlen, &rbuf, rlen);
+    if ( ret < 0 ) {
+      msleep(100);
+    } else {
+      break;
+    }
+  } while( retry-- > 0 );
+
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer, tlen=%d", __func__, tlen);
+  } else {
+    *val = rbuf;
+  }
+
+  if ( i2cfd > 0 ) {
+    close(i2cfd);
+  }
+  return ret;
+}
+
+int
+pal_set_exp_12v_on(uint8_t fru, bool pwr_on) {
+  int i2cfd = BIC_STATUS_FAILURE;
+  int ret = BIC_STATUS_FAILURE;
+  int bus = 0;
+  uint8_t tbuf[2] = {0x0};
+  uint8_t rbuf = 0x0;
+  uint8_t tlen = 0x02;
+  uint8_t rlen = 0x0;
+  uint8_t retry = MAX_READ_RETRY;
+  uint8_t gpv3_hsc = 0;
+
+  switch (fru) {
+    case FRU_CWC:
+      bus = FRU_SLOT1 + SLOT_BUS_BASE;
+      tbuf[0] = REG_CWC_CPLD_CWC_HSC;
+      tbuf[1] = pwr_on ? 0x1 : 0x0;
+      break;
+    case FRU_2U_TOP:
+      bus = FRU_SLOT1 + SLOT_BUS_BASE;
+      tbuf[0] = REG_CWC_CPLD_GPV3_HSC;
+
+      if (pal_get_gpv3_hsc(bus, &gpv3_hsc)) {
+        syslog(LOG_WARNING, "%s() Failed to get gpv3 hsc", __func__);
+        return -1;
+      }
+
+      tbuf[1] = pwr_on ? (gpv3_hsc | 0x01) : (gpv3_hsc & ~0x01);
+      break;
+    case FRU_2U_BOT:
+      bus = FRU_SLOT1 + SLOT_BUS_BASE;
+      tbuf[0] = REG_CWC_CPLD_GPV3_HSC;
+
+      if (pal_get_gpv3_hsc(bus, &gpv3_hsc)) {
+        syslog(LOG_WARNING, "%s() Failed to get gpv3 hsc", __func__);
+        return -1;
+      }
+
+      tbuf[1] = pwr_on ? (gpv3_hsc | 0x02) : (gpv3_hsc & ~0x02);
+      break;
+    default:
+      printf("unknown expantion fru : %d\n", fru);
+      return POWER_STATUS_FRU_ERR;
+  }
+
+  i2cfd = i2c_cdev_slave_open(bus, CWC_CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if ( i2cfd < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to open i2c device %d", __func__, CWC_CPLD_ADDRESS);
+    return i2cfd;
+  }
+
+  do {
+    ret = i2c_rdwr_msg_transfer(i2cfd, CWC_CPLD_ADDRESS, tbuf, tlen, &rbuf, rlen);
+    if ( ret < 0 ) {
+      msleep(100);
+    } else {
+      break;
+    }
+  } while( retry-- > 0 );
+
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer, tlen=%d", __func__, tlen);
+  }
+
+  if ( i2cfd > 0 ) {
+    close(i2cfd);
+  }
+  return 0;
+}
+
+int
+pal_set_exp_12v_cycle(uint8_t fru) {
+  uint8_t status = SERVER_12V_ON;
+  int res = MAX_POWER_CYCLE_DWELL;
+
+  if (pal_set_exp_12v_on(fru, false)) {
+    syslog(LOG_WARNING, "%s() Failed to power off fru : %d", __func__, fru);
+    return POWER_STATUS_ERR;
+  }
+
+  while (res > 0) {
+    if (pal_get_exp_power(fru, &status) < 0) {
+      return POWER_STATUS_ERR;
+    }
+
+    sleep(DELAY_POWER_CYCLE);
+    res -= DELAY_POWER_CYCLE;
+
+    if (status == SERVER_12V_OFF) {
+      break;
+    }
+  }
+
+  if (status == SERVER_12V_ON) {
+    syslog(LOG_WARNING, "%s() Time out to power off fru : %d", __func__, fru);
+    return POWER_STATUS_ERR;
+  }
+
+  if (pal_set_exp_12v_on(fru, true)) {
+    syslog(LOG_WARNING, "%s() Failed to power on fru : %d", __func__, fru);
+    return POWER_STATUS_ERR;
+  }
+
+  return 0;
+}
+
+int
+pal_set_exp_power(uint8_t fru, uint8_t cmd) {
+  uint8_t status = 0;
+
+  if (pal_get_exp_power(fru, &status) < 0) {
+    return POWER_STATUS_ERR;
+  }
+
+  switch (cmd) {
+    case SERVER_12V_OFF:
+      if (status == SERVER_12V_ON) {
+        if (pal_set_exp_12v_on(fru, false)) {
+          syslog(LOG_WARNING, "%s() Failed to set power:%d", __func__, cmd);
+          return POWER_STATUS_ERR;
+        }
+      } else {
+        return 1;
+      }
+      break;
+    case SERVER_12V_ON:
+      if (status == SERVER_12V_OFF) {
+        if (pal_set_exp_12v_on(fru, true)) {
+          syslog(LOG_WARNING, "%s() Failed to set power:%d", __func__, cmd);
+          return POWER_STATUS_ERR;
+        }
+      } else {
+        return 1;
+      }
+      break;
+    case SERVER_12V_CYCLE:
+      if (status == SERVER_12V_ON) {
+        if (pal_set_exp_12v_cycle(fru)) {
+          syslog(LOG_WARNING, "%s() Failed to set power:%d", __func__, cmd);
+          return POWER_STATUS_ERR;
+        }
+      } else {
+        if (pal_set_exp_12v_on(fru, true)) {
+          syslog(LOG_WARNING, "%s() Failed to set power:%d", __func__, cmd);
+          return POWER_STATUS_ERR;
+        }
+      }
+      break;
+    default:
+      printf("unknown expantion command : %d\n", cmd);
+      return POWER_STATUS_ERR;
+  }
+  return 0;
 }

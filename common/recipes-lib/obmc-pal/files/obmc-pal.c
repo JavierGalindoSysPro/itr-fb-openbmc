@@ -61,6 +61,9 @@ pal_is_bmc_por(void)
 
 int __attribute__((weak))
 pal_bmc_reboot(int cmd) {
+  // sync filesystem caches
+  sync();
+
   if (cmd == 0) {
     return run_command("/sbin/reboot");
   }
@@ -465,11 +468,18 @@ pal_parse_oem_unified_sel_common(uint8_t fru, uint8_t *sel, char *error_log)
       break;
 
     case UNIFIED_IIO_ERR:
-      sprintf(error_log, "GeneralInfo: IIOErr(0x%02X), IIO Port Location: Sled %02d/Socket %02d, Stack 0x%02X, Error ID: 0x%02X",
-              general_info, dimm_info.sled, dimm_info.socket, sel[9], sel[12]);
-      sprintf(temp_log, "IIO_ERR CPU%d. Error ID(%02X)",dimm_info.socket, sel[12]);
+    {
+      uint8_t stack = sel[9];
+      uint8_t error_type = sel[13];
+      uint8_t error_severity = sel[14];
+      uint8_t error_id = sel[15];
+
+      sprintf(error_log, "GeneralInfo: IIOErr(0x%02X), IIO Port Location: Sled %02d/Socket %02d, Stack 0x%02X, Error Type: 0x%02X, Error Severity: 0x%02X, Error ID: 0x%02X",
+              general_info, dimm_info.sled, dimm_info.socket, stack, error_type, error_severity, error_id);
+      sprintf(temp_log, "IIO_ERR CPU%d. Error ID(%02X)",dimm_info.socket, error_id);
       pal_add_cri_sel(temp_log);
       break;
+    }
 
     case UNIFIED_POST_ERR:
       event_type = sel[8] & 0xF;
@@ -505,7 +515,7 @@ pal_parse_oem_unified_sel_common(uint8_t fru, uint8_t *sel, char *error_log)
                   general_info, dimm_location_str, (sel[13]&0x01)?"PPR fail":"PPR success");
           break;
         case MEM_NO_DIMM:
-          sprintf(error_log, "GeneralInfo: MemEvent(0x%02X), DIMM Failure Event: %s", 
+          sprintf(error_log, "GeneralInfo: MemEvent(0x%02X), DIMM Failure Event: %s",
                   general_info, mem_event[event_type]);
           break;
         default:
@@ -2081,16 +2091,6 @@ pal_is_fw_update_ongoing_system(void) {
   return false;
 }
 
-int __attribute__((weak))
-pal_preprocess_before_updating_fw(uint8_t slot_id) {
-  return PAL_EOK;
-}
-
-int __attribute__((weak))
-pal_postprocess_after_updating_fw(uint8_t slot_id) {
-  return PAL_EOK;
-}
-
 bool __attribute__((weak))
 pal_sled_cycle_prepare(void) {
   char key[MAX_KEY_LEN] = "blk_fwupd";
@@ -2780,4 +2780,29 @@ pal_bic_hw_reset(void) {
 int __attribute__((weak))
 pal_get_server_12v_power(uint8_t fru_id, uint8_t *status) {
   return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_is_cwc(void) {
+  return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_get_cwc_id(char *str, uint8_t *id) {
+  return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_get_exp_power(uint8_t fru, uint8_t *status) {
+  return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_set_exp_power(uint8_t fru, uint8_t cmd) {
+  return PAL_ENOTSUP;
+}
+
+int __attribute__((weak))
+pal_handle_oem_1s_dev_power(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
+  return CC_NOT_SUPP_IN_CURR_STATE;
 }

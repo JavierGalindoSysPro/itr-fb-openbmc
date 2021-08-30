@@ -480,8 +480,6 @@ bool pal_sled_cycle_prepare(void);
 bool pal_is_crashdump_ongoing_system(void);
 bool pal_is_cplddump_ongoing_system(void);
 bool pal_can_change_power(uint8_t fru);
-int pal_preprocess_before_updating_fw(uint8_t slot_id);
-int pal_postprocess_after_updating_fw(uint8_t slot_id);
 int pal_set_fw_update_state(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
 int run_command(const char* cmd);
 int pal_get_restart_cause(uint8_t slot, uint8_t *restart_cause);
@@ -572,6 +570,11 @@ int pal_bic_hw_reset(void);
 int pal_get_server_12v_power(uint8_t fru_id, uint8_t *status);
 int pal_set_ioc_wwid(uint8_t *ioc_wwid, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
 int pal_get_ioc_wwid(uint8_t ioc_component, uint8_t *res_data, uint8_t *res_len);
+int pal_is_cwc(void);
+int pal_get_cwc_id(char *str, uint8_t *fru);
+int pal_handle_oem_1s_dev_power(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
+int pal_get_exp_power(uint8_t fru, uint8_t *status);
+int pal_set_exp_power(uint8_t fru, uint8_t cmd);
 
 #ifdef __cplusplus
 }

@@ -21,6 +21,9 @@ using namespace std;
 #define UIC_FPGA_ID                      (0x02)
 
 #define MAX10_RPD_SIZE                   (0x5C000)
+#define MD5_OFFSET                       (0x0)
+#define SIGNATURE_OFFSET                 (0x10)
+#define IDENTIFY_OFFSET                  (0x20)
 
 enum {
   CFM_IMAGE_NONE = 0,
@@ -43,7 +46,7 @@ class BmcFpgaComponent : public Component {
     altera_max10_attr_t attr;
     bool is_valid_image(string image, bool force);
     int create_update_image(string image, string update_image);
-    int update_fpga(string image);
+    int update_fpga(string image, string update_image);
     int update_wrapper(string image, bool force);
     int get_ver_str(string& s);
   public:

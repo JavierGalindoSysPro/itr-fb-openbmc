@@ -36,7 +36,6 @@
 #include "bic_xfer.h"
 
 #define MAX_VER_STR_LEN 80
-#define MAX_POSTCODE_LEN 256
 
 //FRU
 #define FRUID_READ_COUNT_MAX 0x20
@@ -204,6 +203,19 @@ bic_get_vr_device_id(uint8_t *rbuf, uint8_t *rlen, uint8_t bus, uint8_t addr) {
   uint8_t tlen = 0;
   int ret = 0;
 
+  // set VR page
+  tbuf[0] = (bus << 1) + 1;
+  tbuf[1] = addr;
+  tbuf[2] = 0x00; //read cnt
+  tbuf[3] = CMD_INF_VR_SET_PAGE; //command code
+  tbuf[4] = 0x01;
+  tlen = 5;
+  ret = bic_ipmb_wrapper(NETFN_APP_REQ, CMD_APP_MASTER_WRITE_READ, tbuf, tlen, rbuf, rlen);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "%s():%d Failed to send command code to switch VR page. ret=%d", __func__,__LINE__, ret);
+    return ret;
+  }
+
   tbuf[0] = (bus << 1) + 1;
   tbuf[1] = addr;
   tbuf[2] = 0x07; //read back 7 bytes
@@ -325,9 +337,8 @@ bic_get_vr_ver(uint8_t bus, uint8_t addr, char *key, char *ver_str) {
   uint8_t rbuf[MAX_IPMB_BUFFER] = {0};
   uint8_t rlen = 0;
   uint8_t remaining_writes = 0;
-  char path[MAX_PATH_LEN] = {0};
   int fd = 0;
-  int ret = 0, rc = 0;
+  int ret = 0;
 
   ret = bic_get_vr_device_id(rbuf, &rlen, bus, addr);
   if (ret < 0) {
@@ -344,9 +355,12 @@ bic_get_vr_ver(uint8_t bus, uint8_t addr, char *key, char *ver_str) {
     //to avoid sensord changing the page of VRs, so use the LOCK file
     //to stop monitoring sensors of VRs
     fd = open(SERVER_SENSOR_LOCK, O_CREAT | O_RDWR, 0666);
-    rc = flock(fd, LOCK_EX | LOCK_NB);
-    if (rc != 0) {
+    ret = flock(fd, LOCK_EX | LOCK_NB);
+    if (ret != 0) {
       if (EWOULDBLOCK == errno) {
+        syslog(LOG_WARNING, "%s():%d Failed to lock VR sensor reading", __func__,__LINE__);
+        remove(SERVER_SENSOR_LOCK);
+        close(fd);
         return -1;
       }
     }
@@ -392,14 +406,12 @@ bic_get_vr_ver(uint8_t bus, uint8_t addr, char *key, char *ver_str) {
     kv_set(key, ver_str, 0, 0);
     
   error_exit:
-    rc = flock(fd, LOCK_UN);
-    if (rc == -1) {
-      syslog(LOG_WARNING, "%s: failed to unflock on %s", __func__, path);
-      close(fd);
-      return rc;
+    ret = flock(fd, LOCK_UN);
+    if (ret == -1) {
+      syslog(LOG_WARNING, "%s: failed to unflock on %s", __func__, SERVER_SENSOR_LOCK);
     }
     close(fd);
-    remove(path);
+    remove(SERVER_SENSOR_LOCK);
     return ret;
     
   } else if (rlen > 4) {
@@ -1017,6 +1029,65 @@ bic_get_gpio(bic_gpio_t *gpio) {
   }
   // Ignore first 3 bytes of IANA ID
   memcpy((uint8_t*) gpio, &rbuf[3], rlen);
+
+  return ret;
+}
+
+// Get BIC Configuration
+int
+bic_get_config(bic_config_t *cfg) {
+  uint8_t tbuf[MAX_IPMB_REQ_LEN] = {0x9c, 0x9c, 0x00}; // IANA ID
+  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0x00};
+  uint8_t rlen = 0;
+  int ret = 0;
+
+  if (cfg == NULL) {
+    syslog(LOG_ERR, "%s(): Configuration is missing", __func__);
+    return -1;
+  }
+  ret = bic_ipmb_wrapper(NETFN_OEM_1S_REQ, CMD_OEM_1S_GET_CONFIG, tbuf, 3, rbuf, &rlen);
+  // Ignore IANA ID
+  if (rlen < 4) {
+    syslog(LOG_ERR, "%s(): Get BIC config failed, rlen: %d", __func__, rlen);
+    return -1;
+  }
+  *(uint8_t *) cfg = rbuf[3];
+
+  return ret;
+}
+
+// Read Sensor Data Records (SDR)
+int
+bic_get_sdr_info(ipmi_sel_sdr_info_t *info) {
+  int ret = 0;
+  uint8_t rlen = 0;
+
+  if (info == NULL) {
+    syslog(LOG_ERR, "%s(): SEL information is missing", __func__);
+    return -1;
+  }
+  ret = bic_ipmb_wrapper(NETFN_STORAGE_REQ, CMD_STORAGE_GET_SDR_INFO, NULL, 0, (uint8_t *) info, &rlen);
+
+  return ret;
+}
+
+int
+bic_get_sel(ipmi_sel_sdr_req_t *req, ipmi_sel_sdr_res_t *res, uint8_t *rlen) {
+  int ret = 0;
+
+  if (req == NULL) {
+    syslog(LOG_ERR, "%s(): requset is missing", __func__);
+    return -1;
+  }
+  if (res == NULL) {
+    syslog(LOG_ERR, "%s(): response is missing", __func__);
+    return -1;
+  }
+  if (rlen == NULL) {
+    syslog(LOG_ERR, "%s(): requset length is missing", __func__);
+    return -1;
+  }
+  ret = bic_ipmb_wrapper(NETFN_STORAGE_REQ, CMD_STORAGE_GET_SEL, (uint8_t *)req, sizeof(ipmi_sel_sdr_req_t), (uint8_t*)res, rlen);
 
   return ret;
 }

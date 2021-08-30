@@ -32,47 +32,59 @@
 #include <string.h>
 #include <time.h>
 #include <openbmc/libgpio.h>
+#include <openbmc/obmc-i2c.h>
 #include <facebook/fbgc_gpio.h>
 #include "fbgc_common.h"
-#include <openbmc/libgpio.h>
-#include <facebook/fbgc_gpio.h>
+#include <openbmc/kv.h>
+
+// Platform signature of image: Grand Canyon
+const char platform_signature[PLAT_SIG_SIZE] = {0x47, 0x72, 0x61, 0x6e, 0x64, 0x20, 0x43, 0x61, 0x6e, 0x79, 0x6f, 0x6e, 0x20, 0x20, 0x20, 0x20};
+
+const char* board_stage[] = {"Pre EVT", "EVT", "DVT", "PVT", "MP"};
 
 int
 fbgc_common_get_chassis_type(uint8_t *type) {
-  int chassis_type_value = 0x0;
+  char system_info[MAX_VALUE_LEN] = {0};
+  int sku_value = 0;
+  int ret = 0;
 
-  gpio_value_t uic_loc_type_in = GPIO_VALUE_INVALID;
-  gpio_value_t uic_rmt_type_in = GPIO_VALUE_INVALID;
-  gpio_value_t scc_loc_type_0 = GPIO_VALUE_INVALID;
-  gpio_value_t scc_rmt_type_0 = GPIO_VALUE_INVALID;
-
-  uic_loc_type_in = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_UIC_LOC_TYPE_IN));
-  uic_rmt_type_in = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_UIC_RMT_TYPE_IN));
-  scc_loc_type_0  = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_SCC_LOC_TYPE_0));
-  scc_rmt_type_0  = gpio_get_value_by_shadow(fbgc_get_gpio_name(GPIO_SCC_RMT_TYPE_0));
-
-  if ((uic_loc_type_in == GPIO_VALUE_INVALID) || (uic_rmt_type_in == GPIO_VALUE_INVALID) ||
-      (scc_loc_type_0 == GPIO_VALUE_INVALID)  || (scc_rmt_type_0 == GPIO_VALUE_INVALID)) {
-    syslog(LOG_WARNING, "%s() failed to get chassis type.", __func__);
+  if (type == NULL) {
+    syslog(LOG_ERR, "%s(): Failed to get chassis type because of NULL parameter\n", __func__);
     return -1;
   }
 
-  //                 UIC_LOC_TYPE_IN   UIC_RMT_TYPE_IN   SCC_LOC_TYPE_0   SCC_RMT_TYPE_0
-  // Type 5                        0                 0                0                0
-  // Type 7 Headnode               0                 1                0                1
+  ret = kv_get(SYSTEM_INFO, system_info, NULL, KV_FPERSIST);
 
-  chassis_type_value = CHASSIS_TYPE_BIT_3(uic_loc_type_in) | CHASSIS_TYPE_BIT_2(uic_rmt_type_in) |
-                       CHASSIS_TYPE_BIT_1(scc_loc_type_0)  | CHASSIS_TYPE_BIT_0(scc_rmt_type_0);
-
-  if (chassis_type_value == CHASSIS_TYPE_5_VALUE) {
-    *type = CHASSIS_TYPE5;
-  } else if (chassis_type_value == CHASSIS_TYPE_7_VALUE) {
-    *type = CHASSIS_TYPE7;
-  } else {
-    syslog(LOG_WARNING, "%s() Unknown chassis type.", __func__);
-    return -1;
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s(): Failed to get chassis type because failed to get key value of %s\n", __func__, SYSTEM_INFO);
+    goto error;
   }
 
+  sku_value = atoi(system_info);
+
+  if (sku_value >= MAX_SKU_VALUE) {
+    syslog(LOG_WARNING, "%s(): Failed to get chassis type because SKU value exceed limit, value: %d\n", __func__, sku_value);
+    goto error;
+  }
+
+  //  SKU[5:0] = {UIC_ID0, UIC_ID1, UIC_TYPE0, UIC_TYPE1, UIC_TYPE2, UIC_TYPE3}
+  switch ((sku_value & 0xF)) {
+    case CHASSIS_TYPE_5_VALUE:
+      *type = CHASSIS_TYPE5;
+      break;
+    case CHASSIS_TYPE_7_VALUE:
+      *type = CHASSIS_TYPE7;
+      break;
+    default:
+      syslog(LOG_WARNING, "%s(): Failed to get chassis type because SKU value is wrong, value: %d\n", __func__, sku_value);
+      goto error;
+  }
+
+  return 0;
+
+error:
+  syslog(LOG_ERR, "%s(): Using default chassis type: Type5\n", __func__);
+  *type = CHASSIS_TYPE5;
   return 0;
 }
 
@@ -218,6 +230,189 @@ fbgc_common_get_system_stage(uint8_t *stage) {
       return -1;
     }
     *stage = (*stage << 1) + val;
+  }
+
+  return 0;
+}
+
+int
+check_image_md5(const char* image_path, int cal_size, uint32_t md5_offset) {
+  int fd = 0, sum = 0, byte_num = 0 , ret = 0, read_bytes = 0;
+  char read_buf[MD5_READ_BYTES] = {0};
+  char md5_digest[MD5_DIGEST_LENGTH] = {0};
+  MD5_CTX context;
+
+  if (image_path == NULL) {
+    syslog(LOG_WARNING, "%s(): failed to calculate MD5 due to NULL parameters.", __func__);
+    return -1;
+  }
+
+  if (cal_size <= 0) {
+    syslog(LOG_WARNING, "%s(): failed to calculate MD5 due to wrong calculate size: %d.", __func__, cal_size);
+    return -1;
+  }
+
+  if (md5_offset <= 0) {
+    syslog(LOG_WARNING, "%s(): failed to calculate MD5 due to wrong offset of MD5: 0x%X.", __func__, md5_offset);
+    return -1;
+  }
+
+  fd = open(image_path, O_RDONLY);
+
+  if (fd < 0) {
+    syslog(LOG_WARNING, "%s(): failed to open %s to calculate MD5.", __func__, image_path);
+    return -1;
+  }
+
+  lseek(fd, 0, SEEK_SET);
+
+  ret = MD5_Init(&context);
+  if (ret == 0) {
+    syslog(LOG_WARNING, "%s(): failed to initialize MD5 context.", __func__);
+    ret = -1;
+    goto exit;
+  }
+
+  while (sum < cal_size) {
+    read_bytes = MD5_READ_BYTES;
+    if ((sum + MD5_READ_BYTES) > cal_size) {
+      read_bytes = cal_size - sum;
+    }
+
+    byte_num = read(fd, read_buf, read_bytes);
+    ret = MD5_Update(&context, read_buf, byte_num);
+    if (ret == 0) {
+      syslog(LOG_WARNING, "%s(): failed to update context to calculate MD5 of %s.", __func__, image_path);
+      ret = -1;
+      goto exit;
+    }
+    sum += byte_num;
+  }
+
+  ret = MD5_Final((uint8_t*)md5_digest, &context);
+  if (ret == 0) {
+    syslog(LOG_WARNING, "%s(): failed to calculate MD5 of %s.", __func__, image_path);
+    ret = -1;
+    goto exit;
+  }
+
+  memset(read_buf, 0, sizeof(read_buf));
+  lseek(fd, md5_offset, SEEK_SET);
+  byte_num = read(fd, read_buf, MD5_DIGEST_LENGTH);
+
+  if (byte_num != MD5_DIGEST_LENGTH) {
+    syslog(LOG_WARNING, "%s(): failed to read the signature of %s.", __func__, image_path);
+    ret = -1;
+    goto exit;
+  }
+
+  if (strncmp(md5_digest, read_buf, sizeof(md5_digest)) != 0) {
+    ret = -1;
+  }
+
+exit:
+  close(fd);
+  return ret;
+}
+
+int
+check_image_signature(const char* image_path, uint32_t sig_offset) {
+  int fd = 0, ret = 0, byte_num = 0;
+  char read_buf[PLAT_SIG_SIZE] = {0};
+
+  if ((image_path == NULL)) {
+   syslog(LOG_WARNING, "%s(): failed to check platform signature of image due to NULL parameter.", __func__);
+    ret = -1;
+    goto exit;
+  }
+
+  if (sig_offset <= 0) {
+    syslog(LOG_WARNING, "%s(): failed to check platform signature of %s due to wrong offset: 0x%X", __func__, image_path, sig_offset);
+    ret = -1;
+    goto exit;
+  }
+
+  fd = open(image_path, O_RDONLY);
+
+  if (fd < 0 ) {
+    syslog(LOG_WARNING, "%s(): failed to open %s to check platform signature.", __func__, image_path);
+    ret = -1;
+    goto exit;
+  }
+
+  lseek(fd, sig_offset, SEEK_SET);
+  byte_num = read( fd, read_buf, sizeof(read_buf));
+
+  if (byte_num != sizeof(read_buf)) {
+    syslog(LOG_WARNING, "%s(): failed to check platform signature of %s because read failed.", __func__, image_path);
+    ret = -1;
+    goto exit;
+  }
+
+  if (strncmp(platform_signature, read_buf, sizeof(read_buf)) != 0) {
+    ret = -1;
+  }
+
+exit:
+  close(fd);
+  return ret;
+}
+
+int
+get_server_board_revision_id(uint8_t* board_rev_id, uint8_t board_rev_id_len) {
+  int i2cfd = 0, ret = 0, retry = 0;
+  uint8_t tbuf[1] = {0};
+  uint8_t tlen = 0;
+
+  if (board_rev_id == NULL) {
+    syslog(LOG_WARNING, "%s(): fail to get board revision id due to NULL parameter", __func__);
+  }
+
+  i2cfd = i2c_cdev_slave_open(I2C_BS_FPGA_BUS, BS_FPGA_SLAVE_ADDR >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if (i2cfd < 0) {
+    syslog(LOG_WARNING, "%s(): fail to open device: I2C BUS: %d", __func__, I2C_BS_FPGA_BUS);
+    return i2cfd;
+  }
+
+  tbuf[0] = BS_FPGA_BOARD_REV_ID_OFFSET;
+  tlen = sizeof(tbuf);
+
+  while (retry < MAX_RETRY) {
+    ret = i2c_rdwr_msg_transfer(i2cfd, BS_FPGA_SLAVE_ADDR, tbuf, tlen, board_rev_id, board_rev_id_len);
+    if ( ret < 0 ) {
+      retry++;
+      msleep(100);
+    } else {
+      ret = 0;
+      break;
+    }
+  }
+
+  if (retry == MAX_RETRY) {
+    syslog(LOG_WARNING, "%s(): fail to read server FPGA offset: 0x%02X via i2c\n", __func__, BS_FPGA_BOARD_REV_ID_OFFSET);
+    ret = -1;
+  }
+
+  close(i2cfd);
+  return ret;
+}
+
+int
+fbgc_common_dev_id(char *str, uint8_t *dev) {
+  if ((str == NULL) || (dev == NULL)) {
+    syslog(LOG_WARNING, "%s(): Failed to get device id due to NULL parameter", __func__);
+    return -1;
+  }
+
+  if (strcmp(str, "e1s0") == 0) {
+    *dev = DEV_ID0_E1S;
+  } else if (strcmp(str, "e1s1") == 0) {
+    *dev = DEV_ID1_E1S;
+  } else {
+#ifdef DEBUG
+    syslog(LOG_WARNING, "s%(): Wrong device name: %s", __func__, str);
+#endif
+    return -1;
   }
 
   return 0;

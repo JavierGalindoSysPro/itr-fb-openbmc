@@ -38,7 +38,9 @@ SRC_URI += "file://board-utils.sh \
             file://setup_i2c.sh \
             file://seutil \
             file://dpm_dump.sh \
+            file://dpm_utils.sh \
             file://dpm_ver.sh \
+            file://pim_dpm_dump.sh \
             file://show_tech.py \
             file://psu_show_tech.py \
             file://pim_enable.sh \
@@ -49,6 +51,7 @@ SRC_URI += "file://board-utils.sh \
             file://meta_info.sh \
             file://beacon_led.sh \
             file://setup_bcm53134.sh \
+            file://th4_qspi_ver.sh \
            "
 
 OPENBMC_UTILS_FILES += " \
@@ -66,6 +69,8 @@ OPENBMC_UTILS_FILES += " \
     setup_i2c.sh \
     seutil \
     dpm_dump.sh \
+    dpm_utils.sh \
+    pim_dpm_dump.sh \
     dpm_ver.sh \
     show_tech.py \
     psu_show_tech.py \
@@ -75,6 +80,7 @@ OPENBMC_UTILS_FILES += " \
     spi_pim_ver.sh \
     meta_info.sh \
     beacon_led.sh \
+    th4_qspi_ver.sh \
     "
 
 DEPENDS_append = " update-rc.d-native"

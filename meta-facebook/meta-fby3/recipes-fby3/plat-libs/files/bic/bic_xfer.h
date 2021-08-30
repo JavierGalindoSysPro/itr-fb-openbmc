@@ -35,21 +35,24 @@ extern "C" {
 extern const uint32_t IANA_ID;
 
 enum {
-  BIC_CMD_OEM_SET_AMBER_LED     = 0x39,
-  BIC_CMD_OEM_GET_SET_GPIO      = 0x41,
-  BIC_CMD_OEM_GET_SET_VY_VR_CNT = 0x42,
-  BIC_CMD_OEM_FW_CKSUM_SHA256   = 0x43,
-  BIC_CMD_OEM_BMC_FAN_CTRL      = 0x50,
-  BIC_CMD_OEM_GET_FAN_DUTY      = 0x51,
-  BIC_CMD_OEM_GET_FAN_RPM       = 0x52,
-  BIC_CMD_OEM_SET_12V_CYCLE     = 0x64,
-  BIC_CMD_OEM_INFORM_SLED_CYCLE = 0x66,
-  BIC_CMD_OEM_BIC_SNR_MONITOR   = 0x68,
-  BIC_CMD_OEM_BIC_VR_MONITOR    = 0x69,
-  BIC_CMD_OEM_GET_BOARD_ID      = 0xA0,
-  BIC_CMD_OEM_GET_MB_INDEX      = 0xF0,
-  BIC_CMD_OEM_SET_FAN_DUTY      = 0xF1,
-  BIC_CMD_OEM_FAN_CTRL_STAT     = 0xF2,
+  BIC_CMD_OEM_SET_AMBER_LED           = 0x39,
+  BIC_CMD_OEM_GET_AMBER_LED_STATUS    = 0x3A,
+  BIC_CMD_OEM_GET_SET_GPIO            = 0x41,
+  BIC_CMD_OEM_GET_SET_VY_VR_CNT       = 0x42,
+  BIC_CMD_OEM_FW_CKSUM_SHA256         = 0x43,
+  BIC_CMD_OEM_BMC_FAN_CTRL            = 0x50,
+  BIC_CMD_OEM_GET_FAN_DUTY            = 0x51,
+  BIC_CMD_OEM_GET_FAN_RPM             = 0x52,
+  BIC_CMD_OEM_SET_12V_CYCLE           = 0x64,
+  BIC_CMD_OEM_INFORM_SLED_CYCLE       = 0x66,
+  BIC_CMD_OEM_BIC_SNR_MONITOR         = 0x68,
+  BIC_CMD_OEM_BIC_VR_MONITOR          = 0x69,
+  BIC_CMD_OEM_GET_DBG_UART            = 0x6A,
+  BIC_CMD_OEM_GET_DBG_PRSNT           = 0x6B,
+  BIC_CMD_OEM_GET_BOARD_ID            = 0xA0,
+  BIC_CMD_OEM_GET_MB_INDEX            = 0xF0,
+  BIC_CMD_OEM_SET_FAN_DUTY            = 0xF1,
+  BIC_CMD_OEM_FAN_CTRL_STAT           = 0xF2,
 };
 
 enum {
@@ -63,6 +66,8 @@ enum {
   BB_BIC_INTF   = 0x10,
   BMC_INTF      = 0x1a,
   REXP_BIC_INTF = 0x15,
+  RREXP_BIC_INTF1 = 0x45,
+  RREXP_BIC_INTF2 = 0x40,
   NONE_INTF     = 0xff,
 };
 
@@ -76,6 +81,7 @@ enum {
   BICSPE = 0x07,
   BICGPV3 = 0x08,
   BIC1OU_E1S = 0x09,
+  BICCWC = 0x0A,
 };
 
 void msleep(int msec);

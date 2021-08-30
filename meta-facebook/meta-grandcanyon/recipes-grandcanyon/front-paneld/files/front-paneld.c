@@ -33,7 +33,9 @@
 #include <sys/time.h>
 #include <openbmc/kv.h>
 #include <openbmc/pal.h>
+#include <openbmc/kv.h>
 #include <facebook/fbgc_common.h>
+#include <facebook/fbgc_gpio.h>
 
 #define LED_INTERVAL_DEFAULT              500 //millisecond
 #define MONITOR_FRU_HEALTH_INTERVAL       1 //second
@@ -41,6 +43,7 @@
 #define DBG_CARD_SHOW_ERR_INTERVAL        1 //second
 #define DBG_CARD_UPDATE_ERR_INTERVAL      5 //second
 #define MONITOR_HB_HEALTH_INTERVAL        1 //second
+#define SYNC_E1S_STATUS_LED_INTERVAL      1 //second
 
 #define MAX_NUM_CHECK_FRU_HEALTH          5
 
@@ -56,6 +59,9 @@ led_sync_handler() {
   int ret = 0, ret2 = 0;
   char identify[MAX_VALUE_LEN] = {0};
   char interval[MAX_VALUE_LEN] = {0};
+
+  // set flag to notice BMC front-paneld led_sync_handler is ready
+  kv_set("flag_front_led_sync", STR_VALUE_1, 0, 0);
 
   while (1) {
     // Handle Slot IDENTIFY condition
@@ -100,10 +106,19 @@ system_status_led_handler() {
   uint8_t server_power_status = SERVER_12V_OFF;
   uint8_t error[MAX_NUM_ERR_CODES] = {0}, error_count = 0;
   bool is_bmc_fault = false;
-  
-  memset(error, 0, sizeof(error));
+  char value[MAX_VALUE_LEN] = {0};
+
+  // set flag to notice BMC front-paneld system_status_led_handler is ready
+  kv_set("flag_front_sys_status_led", STR_VALUE_1, 0, 0);
 
   while(1) {
+    // Get flag to check if status LED is setting by fpc-util
+    ret = kv_get("flag_fpc_status", value, NULL, 0);
+    if ((ret == 0) && (strcmp(value, STR_VALUE_1) == 0)) {
+      sleep(SYNC_SYSTEM_STATUS_LED_INTERVAL);
+      continue;
+    }
+
     ret = pal_get_server_power(FRU_SERVER, &server_power_status);
     if (ret < 0) {
       //if can't get server power status, keep system status LED solid yellow
@@ -180,6 +195,9 @@ fru_health_handler() {
        ERR_CODE_SCC_HEALTH, ERR_CODE_NIC_HEALTH};
   int i = 0, ret = 0;
 
+  // set flag to notice BMC front-paneld fru_health_handler is ready
+  kv_set("flag_front_health", STR_VALUE_1, 0, 0);
+
   while(1) {
     // fru health
     for (i = 0; i < sizeof(fru_list); i++) {
@@ -210,6 +228,9 @@ dbg_card_show_error_code() {
   int ret = 0;
   int poll_error_timer = 0, error_index = 0;
   
+  // set flag to notice BMC front-paneld dbg_card_show_error_code is ready
+  kv_set("flag_front_err_code", STR_VALUE_1, 0, 0);
+
   while(1) {
     ret = pal_is_debug_card_present(&dbg_present);
     if ((ret == 0) && (dbg_present == FRU_PRESENT)) {
@@ -280,6 +301,9 @@ heartbeat_health_handler() {
   int ret = 0, i = 0;
   int hb_health_kv_state = HEARTBEAT_NORMAL, hb_health_last_state = HEARTBEAT_NORMAL;
   
+  // set flag to notice BMC front-paneld heartbeat_health_handler is ready
+  kv_set("flag_front_hb", STR_VALUE_1, 0, 0);
+
   while(1) {
     // Get kv value
     memset(val, 0, sizeof(val));
@@ -358,6 +382,52 @@ heartbeat_health_handler() {
   return NULL;
 }
 
+static void *
+e1s_led_sync_handler() {
+  char val[MAX_VALUE_LEN] = {0};
+  int ret = 0, i = 0;
+  char *key_list[E1S_IOCM_SLOT_NUM] = {"e1s0_led_status", "e1s1_led_status"};
+  e1s_led_id id_list[E1S_IOCM_SLOT_NUM] = {ID_E1S0_LED, ID_E1S1_LED};
+  enum LED_HIGH_ACTIVE blinking_list[E1S_IOCM_SLOT_NUM] = {LED_ON, LED_ON};
+  
+  // set default
+  kv_set(key_list[0], "on", 0, 0);
+  kv_set(key_list[1], "on", 0, 0);
+  
+  while(1) {
+    for (i = 0; i < E1S_IOCM_SLOT_NUM; i++) {
+      if (kv_get(key_list[i], val, NULL, 0) == 0) {
+        if (strcmp(val, "on") == 0) {
+          ret = pal_set_e1s_led(FRU_E1S_IOCM, id_list[i], LED_ON);
+          
+        } else if (strcmp(val, "off") == 0) {
+          ret = pal_set_e1s_led(FRU_E1S_IOCM, id_list[i], LED_OFF);
+          
+        } else if (strcmp(val, "blinking") == 0) {
+          ret = pal_set_e1s_led(FRU_E1S_IOCM, id_list[i], blinking_list[i]);
+          
+          if (blinking_list[i] == LED_ON) {
+            blinking_list[i] = LED_OFF;
+          } else if (blinking_list[i] == LED_OFF) {
+            blinking_list[i] = LED_ON;
+          }
+        }
+        
+        if (ret < 0) {
+          syslog(LOG_ERR, "%s(): Failed to set E1.S%d LED status due to pal_set_e1s_led() failed", __func__, i);
+        }
+        
+      } else {
+        syslog(LOG_ERR, "%s(): Failed to get %s due to kv_get() failed", __func__, key_list[i]);
+      }
+    } // for loop end
+    
+    sleep(SYNC_E1S_STATUS_LED_INTERVAL);
+  } // while loop end
+  
+  pthread_exit(NULL);
+}
+
 int
 main (int argc, char * const argv[]) {
   pthread_t tid_sync_led = 0;
@@ -365,10 +435,13 @@ main (int argc, char * const argv[]) {
   pthread_t tid_sync_system_status_led = 0;
   pthread_t tid_dbg_card_error_code = 0;
   pthread_t tid_monitor_heartbeat_health = 0;
+  pthread_t tid_sync_e1s_led = 0;
   int ret = 0, pid_file = 0;
   int ret_sync_led = 0, ret_monitor_fru = 0, ret_sync_system_status_led = 0;
   int ret_dbg_card_error_code = 0;
   int ret_heartbeat = 0;
+  int ret_sync_e1s_led = 0;
+  uint8_t chassis_type = 0;
 
   pid_file = open("/var/run/front-paneld.pid", O_CREAT | O_RDWR, 0666);
   if (pid_file < 0) {
@@ -412,6 +485,16 @@ main (int argc, char * const argv[]) {
     ret_heartbeat = -1;
   }
   
+  ret = fbgc_common_get_chassis_type(&chassis_type);
+  if ((ret == 0) && (chassis_type == CHASSIS_TYPE5)) {
+    if (pthread_create(&tid_sync_e1s_led, NULL, e1s_led_sync_handler, NULL) < 0) {
+      syslog(LOG_WARNING, "fail to create thread to sync E1.S status LED\n");
+      ret_sync_e1s_led = -1;
+    }
+  } else {
+    ret_sync_e1s_led = -1;
+  }
+    
   if (ret_sync_led == 0) {
     pthread_join(tid_sync_led, NULL);
   }
@@ -426,6 +509,9 @@ main (int argc, char * const argv[]) {
   }
   if (ret_heartbeat == 0) {
     pthread_join(tid_monitor_heartbeat_health, NULL);
+  }
+  if (ret_sync_e1s_led == 0) {
+    pthread_join(tid_sync_e1s_led, NULL);
   }
 
 err:

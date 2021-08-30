@@ -37,7 +37,6 @@ IMAGE_INSTALL += " \
   fw-util \
   hsvc-util \
   fpc-util \
-  imc-util \
   me-util \
   crashdump \
   log-util-v2 \
@@ -61,4 +60,5 @@ IMAGE_INSTALL += " \
   setup-gpio \
   at \
   name-util \
+  syseventgen-util \
   "

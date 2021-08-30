@@ -25,20 +25,24 @@ from subprocess import *
 from node import node
 from rest_pal_legacy import *
 
-class serverPower():
-    '''
+
+class serverPower:
+    """
     This server power definitions should maintain the order as same as libpal
     common/recipes-lib/obmc-pal/files/obmc-pal.h
-    '''
-    SERVER_POWER_OFF            = 0
-    SERVER_POWER_ON             = 1
-    SERVER_POWER_CYCLE          = 2
-    SERVER_POWER_RESET          = 3
-    SERVER_GRACEFUL_SHUTDOWN    = 4
-    SERVER_12V_OFF              = 5
-    SERVER_12V_ON               = 6
-    SERVER_12V_CYCLE            = 7
-    SERVER_GLOBAL_RESET         = 8
+    """
+
+    SERVER_POWER_OFF = 0
+    SERVER_POWER_ON = 1
+    SERVER_POWER_CYCLE = 2
+    SERVER_POWER_RESET = 3
+    SERVER_GRACEFUL_SHUTDOWN = 4
+    SERVER_12V_OFF = 5
+    SERVER_12V_ON = 6
+    SERVER_12V_CYCLE = 7
+    SERVER_GLOBAL_RESET = 8
+
+
 class serverNode(node):
     def __init__(self, num=None, fru_name=None, info=None, actions=None):
         self.num = num
@@ -56,7 +60,7 @@ class serverNode(node):
         else:
             self.actions = actions
 
-    def getInformation(self, param={}):
+    async def getInformation(self, param={}):
         ret = pal_get_server_power(self.num)
         if ret == serverPower.SERVER_POWER_OFF:
             status = "power-off"
@@ -75,7 +79,7 @@ class serverNode(node):
 
         return info
 
-    def doAction(self, data, param={}):
+    async def doAction(self, data, param={}):
         ret = pal_server_action(self.num, data["action"], self.fru_name)
         if ret == -2:
             res = "Should not execute power on/off/graceful_shutdown/cycle/reset on device card"

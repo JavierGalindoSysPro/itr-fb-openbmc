@@ -1,5 +1,6 @@
 {
   "version": "1.0",
+  "log_rearm": true,
   "heartbeat": {
     "interval": 50
   },
@@ -78,7 +79,7 @@
     "regenerating_interval": 1200
   },
   "verified_boot": {
-    "enabled": false
+    "enabled": true
   },
   "bmc_timestamp": {
     "enabled": true
@@ -86,6 +87,11 @@
   "bic_health": {
     "enabled": true,
     "fru": 1
+  },
+  "nm_monitor": {
+    "enabled": true,
+    "retry_threshold": 1,
+    "nm_transmission_via_bic": true
   }
 }
 

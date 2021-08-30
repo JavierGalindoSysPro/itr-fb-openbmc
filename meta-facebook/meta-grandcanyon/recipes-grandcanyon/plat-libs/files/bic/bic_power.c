@@ -41,16 +41,6 @@
 #define POWER_BTN_HIGH ((1 << BS_FPGA_PWR_BTN_BIT) | (1 << BS_FPGA_RST_BTN_BIT))
 #define POWER_BTN_LOW  ((0 << BS_FPGA_PWR_BTN_BIT) | (1 << BS_FPGA_RST_BTN_BIT))
 
-//The delay of power control
-#define DELAY_DC_POWER_CYCLE 5
-#define DELAY_DC_POWER_OFF 6
-#define DELAY_GRACEFUL_SHUTDOWN 1
-#define DELAY_DC_POWER_ON 1
-#define DELAY_RESET 1
-
-#define PWR_CTRL_ACT_CNT 3
-
-
 static int
 bic_set_pwr_btn(uint8_t val) {
   uint8_t rbuf[MAX_IPMB_BUFFER] = {0x00};
@@ -74,10 +64,8 @@ int
 bic_server_power_ctrl(int action) {
   uint8_t pwr_seq[PWR_CTRL_ACT_CNT] = {POWER_BTN_HIGH, POWER_BTN_LOW, POWER_BTN_HIGH};
   gpio_value_t rst_seq[PWR_CTRL_ACT_CNT] = {GPIO_VALUE_HIGH, GPIO_VALUE_LOW, GPIO_VALUE_HIGH};
-  uint8_t status = 0;
   int ret = 0;
   int i = 0;
-  int times = 0;
   
   if ( (action != SET_DC_POWER_OFF) && (action != SET_DC_POWER_ON) 
     && (action != SET_GRACEFUL_POWER_OFF) && (action != SET_HOST_RESET)) {
@@ -119,25 +107,7 @@ bic_server_power_ctrl(int action) {
     }     
   }
   
-  if (action == SET_HOST_RESET) {
-    return ret;
-  } else {
-    while (times < WAIT_POWER_STATUS_CHANGE_TIME) {
-      ret = bic_get_server_power_status(&status);
-      if ((ret == 0) && (action == SET_DC_POWER_ON) && (status == STAT_DC_ON)) {
-        return ret;
-      } else if ((ret == 0) && (action == SET_DC_POWER_OFF) && (status == STAT_DC_OFF)) {
-        return ret;
-      } else if ((ret == 0) && (action == SET_GRACEFUL_POWER_OFF) && (status == STAT_DC_OFF)) {
-        return ret;
-      } else {
-        sleep(1);
-        times++;
-      }
-    }
-    syslog(LOG_ERR, "%s() Cannot set power state\n", __func__);
-    return -1;
-  }
+  return ret;
 }
 
 int
