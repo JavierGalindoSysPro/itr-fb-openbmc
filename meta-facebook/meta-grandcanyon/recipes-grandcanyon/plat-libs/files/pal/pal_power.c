@@ -156,7 +156,8 @@ pal_set_power_restore_policy(uint8_t slot, uint8_t *pwr_policy, uint8_t *res_dat
       }
       break;
     case POWER_CFG_LPS:
-      if (pal_set_key_value(key, "lps") != 0) {
+      syslog(LOG_WARNING, "LPS state is deprecated, set the power policy to be ON by default.");
+      if (pal_set_key_value(key, "on") != 0) {
         completion_code = CC_UNSPECIFIED_ERROR;
       }
       break;
@@ -342,11 +343,15 @@ pal_host_power_on_post_actions() {
         return -2;
       }
     }
-
-    snprintf(path, sizeof(path), EEPROM_PATH, I2C_T5E1S1_T7IOC_BUS, IOCM_FRU_ADDR);
-    if (pal_copy_eeprom_to_bin(path, FRU_IOCM_BIN) < 0) {
-      syslog(LOG_WARNING, "%s() Failed to copy %s to %s", __func__, path, FRU_IOCM_BIN);
-      return -2;
+    if (access(FRU_IOCM_BIN, F_OK) == -1) {
+      snprintf(path, sizeof(path), EEPROM_PATH, I2C_T5E1S1_T7IOC_BUS, IOCM_FRU_ADDR);
+      if (pal_copy_eeprom_to_bin(path, FRU_IOCM_BIN) < 0) {
+        syslog(LOG_WARNING, "%s() Failed to copy %s to %s", __func__, path, FRU_IOCM_BIN);
+        return -2;
+      }
+      if (pal_check_fru_is_valid(FRU_IOCM_BIN) < 0) {
+        syslog(LOG_WARNING, "%s() The FRU %s is wrong.", __func__, FRU_IOCM_BIN);
+      }
     }
   }
 
@@ -541,7 +546,12 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
   }
   
   if (is_ctrl_via_bic == true) {
-    printf("Warning: Server FPGA fw version is too old, please update\n");
+    // if get fail show wrong message
+    if (ret < 0) {
+      printf("Warning: Server FPGA fw version is missing or not ready, control via BIC\n");
+    } else {
+      printf("Warning: Server FPGA fw version is too old, please update\n");
+    }    
   }
 
   // Discard all the non-12V power control commands if 12V is off
@@ -735,40 +745,6 @@ pal_sled_cycle(void) {
   }
 
   return POWER_STATUS_OK;
-}
-
-int
-pal_set_last_pwr_state(uint8_t fru, char *state) {
-  int ret = 0;
-  
-  if (state == NULL) {
-    syslog(LOG_WARNING, "%s() NULL pointer: *state", __func__);
-    return -1;
-  }
-
-  ret = pal_set_key_value("pwr_server_last_state", state);
-  if (ret < 0) {
-    syslog(LOG_WARNING, "%s: pal_set_key_value failed", __func__);
-  }
-
-  return ret;
-}
-
-int
-pal_get_last_pwr_state(uint8_t fru, char *state) {
-  int ret = 0;
-  
-  if (state == NULL) {
-    syslog(LOG_WARNING, "%s() NULL pointer: *state", __func__);
-    return -1;
-  }
-
-  ret = pal_get_key_value("pwr_server_last_state", state);
-  if (ret < 0) {
-    syslog(LOG_WARNING, "%s: pal_get_key_value failed", __func__);
-  }
-
-  return ret;
 }
 
 int

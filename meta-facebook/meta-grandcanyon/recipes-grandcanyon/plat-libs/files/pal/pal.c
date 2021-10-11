@@ -60,7 +60,9 @@
 #define MAX_SNR_NAME  32
 #define MAX_EVENT_STR 256
 
-#define BIC_HEARTBEAT_PATH "/sys/class/hwmon/hwmon1/fan0_input"
+#define HWMON_PWM_PATH "/sys/devices/platform/pwm-fan0/hwmon/hwmon*"
+#define PWM1           "pwm1"
+#define KV_KEY_BIC_HEARTBEAT  "bic_hb_status"
 
 #define NIC_CARD_PERST_CTRL 0x09
 
@@ -88,9 +90,6 @@ const char pal_tach_list[] = "0...7";
 size_t pal_pwm_cnt = 1;
 size_t pal_tach_cnt = 8;
 
-// TODO: temporary mapping table, will get from fan config after fan table is ready
-uint8_t fanid2pwmid_mapping[] = {0, 0, 0, 0, 0, 0, 0, 0};
-
 enum key_event {
   KEY_BEFORE_SET,
   KEY_AFTER_INI,
@@ -117,7 +116,6 @@ struct pal_key_cfg {
   {"server_por_cfg", "on", NULL},
   {"sysfw_ver_server", "0", NULL},
   {"system_identify_led_interval", "default", NULL},
-  {"pwr_server_last_state", "on", NULL},
   {"system_info", "0", NULL},
   {"scc_ioc_fw_recovery", "0", NULL},
   {"iocm_ioc_fw_recovery", "0", NULL},
@@ -257,12 +255,23 @@ pal_cfg_key_check(char *key) {
 int
 pal_get_key_value(char *key, char *value) {
   int index = 0;
+  int ret = 0;
 
   // Check key is defined and valid
   if ((index = pal_key_index(key)) < 0) {
     return -1;
   }
-  return kv_get(key, value, NULL, KV_FPERSIST);
+
+  ret = kv_get(key, value, NULL, KV_FPERSIST);
+  if ((ret == 0) && (strcmp(key, "server_por_cfg") == 0)) {
+    if (strcmp(value, "lps") == 0) {
+      printf("Warning: LPS state is deprecated, set the power policy to be ON by default.\n");
+      snprintf(value, MAX_VALUE_LEN, "on");
+      kv_set(key, value, 0, KV_FPERSIST);
+    }
+  }
+
+  return ret;
 }
 
 int
@@ -276,6 +285,13 @@ pal_set_key_value(char *key, char *value) {
     ret = key_cfg[index].function(KEY_BEFORE_SET, value);
     if (ret < 0) {
       return ret;
+    }
+  }
+
+  if (strcmp(key, "server_por_cfg") == 0) {
+    if (strcmp(value, "lps") == 0) {
+      printf("Warning: LPS state is deprecated, set the power policy to be ON by default.\n");
+      snprintf(value, MAX_VALUE_LEN, "on");
     }
   }
 
@@ -593,35 +609,51 @@ pal_get_fru_name(uint8_t fru, char *name) {
 
 int
 pal_set_fan_speed(uint8_t fan_id, uint8_t pwm) {
-  char label[MAX_PWM_LABEL_LEN] = {0};
-  int zone = 0;
+  char str[MAX_VALUE_LEN] = {0};
+  char full_dir_name[MAX_PATH_LEN * 2] = {0};
+  char dir_name[MAX_PATH_LEN] = {0};
+  int value = 0;
 
   if (fan_id >= pal_pwm_cnt) {
     syslog(LOG_WARNING, "%s: Invalid fan index: %d", __func__, fan_id);
     return -1;
   }
-  zone = fanid2pwmid_mapping[fan_id];
-  snprintf(label, sizeof(label), "pwm%d", zone);
 
-  return sensors_write_fan(label, (float)pwm);
+  value = (int)(pwm) * 255 / 100;
+  snprintf(str, sizeof(str), "%d", value);
+
+  if (get_current_dir(HWMON_PWM_PATH, dir_name) < 0) {
+    syslog(LOG_WARNING, "%s() Failed to get dir: %s\n", __func__, HWMON_PWM_PATH);
+    return -1;
+  }
+
+  snprintf(full_dir_name, sizeof(full_dir_name), "%s/%s", dir_name, PWM1);
+
+  return write_device(full_dir_name, str);
 }
 
 int
 pal_get_pwm_value(uint8_t fan_id, uint8_t *pwm) {
-  char label[MAX_PWM_LABEL_LEN] = {0};
-  float value = 0;
+  int value = 0;
   int ret = 0;
-  int zone = 0;
+  char full_dir_name[MAX_PATH_LEN * 2] = {0};
+  char dir_name[MAX_PATH_LEN] = {0};
 
   if (fan_id >= pal_get_tach_cnt()) {
     syslog(LOG_WARNING, "%s: Invalid fan index: %d", __func__, fan_id);
     return -1;
   }
-  zone = fanid2pwmid_mapping[fan_id];
-  snprintf(label, sizeof(label), "pwm%d", zone);
-  ret = sensors_read_fan(label, &value);
+
+  if (get_current_dir(HWMON_PWM_PATH, dir_name) < 0) {
+    syslog(LOG_WARNING, "%s() Failed to get dir: %s\n", __func__, HWMON_PWM_PATH);
+    return -1;
+  }
+
+  snprintf(full_dir_name, sizeof(full_dir_name), "%s/%s", dir_name, PWM1);
+
+  ret = read_device(full_dir_name, &value);
   if (ret == 0) {
-    *pwm = (uint8_t)value;
+    *pwm = (uint8_t)ceil((float)value * 100.0 / 255.0);
   }
 
   return ret;
@@ -1407,6 +1439,10 @@ int
 pal_get_debug_card_uart_sel(uint8_t *uart_sel) {
   int i = 0;
   gpio_value_t val = GPIO_VALUE_INVALID;
+  uint8_t uart_sel_tmp = 0;
+  uint8_t uart_sel_list[] = { DEBUG_UART_SEL_BMC, DEBUG_UART_SEL_HOST, DEBUG_UART_SEL_BIC,
+    DEBUG_UART_SEL_EXP_SMART, DEBUG_UART_SEL_EXP_SDB,
+    DEBUG_UART_SEL_IOC_T5_SMART, DEBUG_UART_SEL_IOC_T7_SMART };
 
   if (uart_sel == NULL) {
     syslog(LOG_ERR, "%s Invalid parameter: UART selection\n", __func__);
@@ -1422,9 +1458,11 @@ pal_get_debug_card_uart_sel(uint8_t *uart_sel) {
       return -1;
     }
     // convert GPIOs to number
-    (*uart_sel) <<= 1;
-    (*uart_sel) |= (uint8_t)val;
+    uart_sel_tmp <<= 1;
+    uart_sel_tmp |= (uint8_t)val;
   }
+
+  (*uart_sel) = uart_sel_list[uart_sel_tmp];
 
   return 0;
 }
@@ -1865,7 +1903,7 @@ int
 pal_read_error_code_file(uint8_t *error_code_array, uint8_t error_code_array_len) {
   FILE *err_file = NULL;
   int i = 0, ret = 0;
-  int err_tmp = 0;
+  unsigned int err_tmp = 0;
 
   if (error_code_array == NULL) {
     syslog(LOG_WARNING, "%s(): fail to read error code because NULL parameter: *error_code_byte", __func__);
@@ -2448,13 +2486,13 @@ pal_bic_sel_handler(uint8_t snr_num, uint8_t *event_data) {
     if (kv_get(key, val, NULL, 0) == 0) {
       sel_error_record = atoi(val);
     }
-    
+
     if (event_dir == EVENT_ASSERT) {
       sel_error_record++;
     } else {
       sel_error_record--;
     }
-    
+
     snprintf(val, sizeof(val), "%d", sel_error_record);
     kv_set(key, val, 0, 0);
 
@@ -2514,15 +2552,15 @@ pal_oem_unified_sel_handler(uint8_t fru, uint8_t general_info, uint8_t *sel) {
     syslog(LOG_ERR, "%s(): Failed to handle OEM unified sel due to NULL parameter.", __func__);
     return PAL_ENOTREADY;
   }
-  
+
   // Update SEL event error record
   snprintf(key, sizeof(key), "sel_event_error_record");
   if (kv_get(key, val, NULL, 0) == 0) {
     sel_event_error_record = atoi(val);
   }
-  
+
   sel_event_error_record++;
-  
+
   snprintf(val, sizeof(val), "%d", sel_event_error_record);
   if (kv_set(key, val, 0, 0) < 0) {
     syslog(LOG_ERR, "%s(): Failed to handle OEM unified sel due to pal_set_key_value failed. key: %s", __func__, key);
@@ -2634,10 +2672,13 @@ pal_set_sensor_health(uint8_t fru, uint8_t value) {
       snprintf(key, sizeof(key), "uic_sensor_health");
       break;
     case FRU_DPB:
-    case FRU_SCC:
-      // SCC and DPB sensor event SEL are sent by Expander
+      // DPB sensor event SEL are sent by Expander
       // health value will change when get SEL
       return 0;
+    case FRU_SCC:
+      // SCC IOC temperature is monitoring by BMC and the rest of sensors of SCC are monitoring by Expander.
+      snprintf(key, sizeof(key), "scc_sensor_health");
+      break;
     case FRU_NIC:
       snprintf(key, sizeof(key), "nic_sensor_health");
       break;
@@ -2807,24 +2848,28 @@ void pal_update_ts_sled() {
   }
 }
 
-int
-pal_get_heartbeat(float *hb_val, uint8_t component) {
+bool
+pal_is_heartbeat_ok(uint8_t component) {
   char label[MAX_PWM_LABEL_LEN] = {0};
-  int ret = 0;
+  char kv_value[MAX_VALUE_LEN] = {0};
+  float hb_val = 0;
+  bool is_read = false;
 
-  if (hb_val == NULL) {
-    syslog(LOG_WARNING, "%s(): fail to get heartbeat because parameter: *hb_val is NULL", __func__);
-  }
-
-  memset(label, 0, sizeof(label));
   snprintf(label, sizeof(label), "fan%d", component);
+
   // get heartbeat from tacho driver
-  ret = sensors_read_fan(label, hb_val);
-  if (ret < 0) {
+  if (sensors_read_fan(label, &hb_val) < 0) {
     syslog(LOG_WARNING, "%s(): fail to get heartbeat, component = %d", __func__, component);
+  } else if (hb_val != 0) {
+    is_read = true;
   }
 
-  return ret;
+  if (component == HEARTBEAT_BIC) { // cache BIC heartbeat reading for healthd
+    snprintf(kv_value, sizeof(kv_value), "%d", is_read);
+    kv_set(KV_KEY_BIC_HEARTBEAT, kv_value, 0, 0);
+  }
+
+  return is_read;
 }
 
 int
@@ -3223,19 +3268,30 @@ pal_is_bic_ready(uint8_t fru, uint8_t *status) {
 
 bool
 pal_is_bic_heartbeat_ok(uint8_t fru) {
-  int hb_val = 0;
+  uint8_t power_status = 0, server_present = 0;
   int ret = 0;
+  char val[MAX_VALUE_LEN] = {0};
 
   if (fru != FRU_SERVER) {
     syslog(LOG_WARNING, "%s(): FRU %x does not have BIC component", __func__, fru);
     return PAL_ENOTSUP;
   }
-  ret = read_device(BIC_HEARTBEAT_PATH, &hb_val);
-  if ((ret < 0) || (hb_val == 0)) {
+
+  ret = pal_is_fru_prsnt(fru, &server_present);
+  if ((ret == 0) && (server_present == FRU_ABSENT)) {
+    return true;
+  }
+
+  ret = pal_get_server_12v_power(fru, &power_status);
+  if ((ret == 0) && (power_status == SERVER_12V_OFF)) {
+    return true;
+  }
+
+  if (kv_get(KV_KEY_BIC_HEARTBEAT, val, NULL, 0)) {
     return false;
   }
 
-  return true;
+  return atoi(val);
 }
 
 int
@@ -3514,6 +3570,11 @@ pal_is_ioc_ready(uint8_t i2c_bus) {
     return false;
   }
 
+  // Check if BIC is updating
+  if (pal_is_fw_update_ongoing(FRU_SERVER) == true) {
+    return false;
+  }
+
   // Check BIOS is completed via BIC
   if (bic_get_gpio(&gpio) < 0) {
     syslog(LOG_WARNING, "%s() Failed to get value of BIOS complete pin via BIC", __func__);
@@ -3732,7 +3793,7 @@ pal_get_fpga_ver_cache(uint8_t bus, uint8_t addr, char *ver_str) {
 int
 pal_set_fpga_ver_cache(uint8_t bus, uint8_t addr) {
   uint32_t ver_reg = GET_FPGA_VER_OFFSET;
-  int i2cfd = 0, ret = 0;
+  int i2cfd = 0, ret = 0, retry = 0;
   uint8_t tbuf[MAX_FPGA_VER_LEN] = {0x00};
   uint8_t rbuf[MAX_FPGA_VER_LEN] = {0x00};
   uint8_t rlen = sizeof(rbuf), tlen = sizeof(tbuf);
@@ -3751,13 +3812,20 @@ pal_set_fpga_ver_cache(uint8_t bus, uint8_t addr) {
   } else {
     memcpy(tbuf, &ver_reg, tlen);
 
-    ret = i2c_rdwr_msg_transfer(i2cfd, addr << 1, tbuf, tlen, rbuf, rlen);
-    if (ret == 0) {
-      snprintf(key, sizeof(key), "fpga_bus%d_addr%02Xh_version", bus, addr);
-      snprintf(value, sizeof(value), "%02X%02X%02X%02X", rbuf[3], rbuf[2], rbuf[1], rbuf[0]);
-      kv_set(key, value, 0, 0);
-
-    } else {
+    while (retry < MAX_RETRY) {
+      ret = i2c_rdwr_msg_transfer(i2cfd, addr << 1, tbuf, tlen, rbuf, rlen);
+      if (ret == 0) {
+        snprintf(key, sizeof(key), "fpga_bus%d_addr%02Xh_version", bus, addr);
+        snprintf(value, sizeof(value), "%02X%02X%02X%02X", rbuf[3], rbuf[2], rbuf[1], rbuf[0]);
+        kv_set(key, value, 0, 0);
+        break;
+      } else {
+        retry++;
+        msleep(100);
+      }
+    }
+    
+    if (retry == MAX_RETRY) {
       syslog(LOG_ERR, "Fail to set FPGA version cache value due to i2c_rdwr_msg_transfer failed. bus: %d addr: %02Xh ret: %d", bus, addr, ret);
     }
   }
@@ -3773,20 +3841,20 @@ int pal_get_num_devs(uint8_t slot, uint8_t *num) {
     syslog(LOG_ERR, "%s: Failed to get device num due to parameter *num is NULL", __func__);
     return -1;
   }
-  
+
   *num = MAX_NUM_DEVS - 1;
-  
+
   return 0;
 }
 
 int
 pal_get_dev_id(char *str, uint8_t *dev) {
-  
+
   if ((str == NULL) || (dev == NULL)) {
     syslog(LOG_ERR, "%s: Failed to get device id due to parameter is NULL", __func__);
     return -1;
   }
-  
+
   return fbgc_common_dev_id(str, dev);
 }
 
@@ -3797,16 +3865,16 @@ pal_handle_oem_1s_dev_power(uint8_t slot, uint8_t *req_data, uint8_t req_len, ui
   int ret = 0;
   char key[MAX_KEY_LEN] = {0};
   char val[MAX_VALUE_LEN] = {0};
-  
+
   if ((req_data == NULL) || (res_data == NULL) || (res_len == NULL)) {
     syslog(LOG_WARNING, "%s: Failed to handle device power due to parameters are NULL.", __func__);
     return CC_INVALID_PARAM;
   }
-  
+
   if ((req_len < 2) || (req_len > 3)) {
     return CC_INVALID_LENGTH;
   }
-  
+
   ret = fbgc_common_get_chassis_type(&chassis_type);
   if ((ret < 0) || (chassis_type != CHASSIS_TYPE5)) {
     syslog(LOG_WARNING, "%s: Failed to handle device power due to only support Type5.", __func__);
@@ -3818,78 +3886,78 @@ pal_handle_oem_1s_dev_power(uint8_t slot, uint8_t *req_data, uint8_t req_len, ui
     syslog(LOG_ERR, "%s: Failed to handle device power due to wrong device id: %d.", __func__, dev_id);
     return CC_PARAM_OUT_OF_RANGE;
   }
-  
+
   // Action: get device power
   if ((req_data[1] == GET_DEV_POWER) && (req_len == 2)) {
-    
+
     ret = pal_get_device_power(slot, dev_id + 1, &res_data[0], &dev_type);
     if (ret < 0) {
       syslog(LOG_WARNING, "%s: Failed to get device %d power", __func__, dev_id);
       return CC_UNSPECIFIED_ERROR;
     }
-    
+
     *res_len = 1;
-  
+
   // Action: set device power
   } else if ((req_data[1] == SET_DEV_POWER) && (req_len == 3)) {
-    
+
     if ((req_data[2] != DEVICE_POWER_ON) && (req_data[2] != DEVICE_POWER_OFF)) {
       syslog(LOG_ERR, "%s: Failed to set device power due to wrong power status: 0x%02X.", __func__, req_data[2]);
-      return CC_UNSPECIFIED_ERROR; 
+      return CC_UNSPECIFIED_ERROR;
     }
-    
+
     ret = pal_set_dev_power_status(dev_id + 1, req_data[2]);
     if (ret < 0) {
       syslog(LOG_ERR, "%s: Failed to set device %d power.", __func__, dev_id);
       return CC_UNSPECIFIED_ERROR;
     }
-  
+
   // Action: get device led
   } else if ((req_data[1] == GET_DEV_LED) && (req_len == 2)) {
     snprintf(key, sizeof(key), "e1s%d_led_status", dev_id);
-    
+
     ret = kv_get(key, val, NULL, 0);
     if (ret < 0) {
       syslog(LOG_ERR, "%s: Failed to get device %d led status.", __func__, dev_id);
       return CC_UNSPECIFIED_ERROR;
     }
-    
+
     if (strcmp(val, "on") == 0) {
       res_data[0] = DEV_LED_ON;
-      
+
     } else if (strcmp(val, "off") == 0) {
       res_data[0] = DEV_LED_OFF;
-      
+
     } else if (strcmp(val, "blinking") == 0) {
       res_data[0] = DEV_LED_BLINKING;
     }
-    
+
     *res_len = 1;
-  
+
   // Action: set device led
   } else if ((req_data[1] == SET_DEV_LED) && (req_len == 3)) {
     snprintf(key, sizeof(key), "e1s%d_led_status", dev_id);
-    
+
     if (req_data[2] == DEV_LED_ON) {
       snprintf(val, sizeof(val), "on");
-      
+
     } else if (req_data[2] == DEV_LED_OFF) {
       snprintf(val, sizeof(val), "off");
-      
+
     } else if (req_data[2] == DEV_LED_BLINKING) {
       snprintf(val, sizeof(val), "blinking");
-      
+
     } else {
       syslog(LOG_ERR, "%s: Failed to set device led status due to wrong led status: 0x%02X.", __func__, req_data[2]);
       return CC_UNSPECIFIED_ERROR;
     }
-    
+
     ret = kv_set(key, val, 0, 0);
     if (ret < 0) {
       syslog(LOG_ERR, "%s: Failed to set device %d led status.", __func__, dev_id);
       return CC_UNSPECIFIED_ERROR;
     }
-  
+
   // Action: get device present
   } else if ((req_data[1] == GET_DEV_PRESENT) && (req_len == 2)) {
 
@@ -3900,7 +3968,7 @@ pal_handle_oem_1s_dev_power(uint8_t slot, uint8_t *req_data, uint8_t req_len, ui
     }
 
     *res_len = 1;
-  
+
   } else {
     syslog(LOG_ERR, "%s: Failed to handle device: 0x%02X action: 0x%02X req_len: %d", __func__, dev_id, req_data[1], req_len);
     return CC_UNSPECIFIED_ERROR;
@@ -3915,8 +3983,8 @@ pal_clear_event_only_error_ack () {
   char key[MAX_KEY_LEN] = {0};
   char val[MAX_VALUE_LEN] = {0};
   int sel_error_record = 0, sel_event_error_record = 0;
-  
-  // Clear SEL event error record  
+
+  // Clear SEL event error record
   snprintf(key, sizeof(key), "sel_event_error_record");
   snprintf(val, sizeof(val), "%d", sel_event_error_record);
   ret = kv_set(key, val, 0, 0);
@@ -3924,13 +3992,13 @@ pal_clear_event_only_error_ack () {
     syslog(LOG_ERR, "%s(): Failed to clear event only error record due to pal_set_key_value failed. key: %s", __func__, key);
     return -1;
   }
-  
+
   // Get SEL error record
   snprintf(key, sizeof(key), "sel_error_record");
   if (kv_get(key, val, NULL, 0) == 0) {
     sel_error_record = atoi(val);
   }
-  
+
   // Update server_sel_error
   snprintf(key, sizeof(key), "server_sel_error");
   if (sel_error_record > 0) {
@@ -3938,12 +4006,12 @@ pal_clear_event_only_error_ack () {
   } else {
     snprintf(val, sizeof(val), "%d", FRU_STATUS_GOOD);
   }
-  
+
   ret = pal_set_key_value(key, val);
   if (ret < 0) {
     syslog(LOG_ERR, "%s(): Failed to update error record due to pal_set_key_value failed. key: %s", __func__, key);
   }
-  
+
   return ret;
 }
 
@@ -4046,4 +4114,36 @@ pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log) {
   pal_parse_oem_unified_sel_common(fru, sel, error_log);
 
   return PAL_EOK;
+}
+
+int
+pal_set_fw_update_state(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
+  int ret = 0;
+
+  if ((req_data == NULL) || (res_data == NULL) || (res_len == NULL)) {
+    syslog(LOG_ERR, "%s(): Failed to set fw update status due to parameters are NULL.", __func__);
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  if (req_len != 2) {
+    return CC_INVALID_LENGTH;
+  }
+
+  ret = pal_set_fw_update_ongoing(slot, (req_data[1]<<8 | req_data[0]));
+  if (ret < 0) {
+    return CC_UNSPECIFIED_ERROR;
+  }
+  *res_len = 0;
+
+  return CC_SUCCESS;
+}
+
+int
+pal_ignore_thresh(uint8_t fru, uint8_t snr_num, uint8_t thresh) {
+  // Only SCC IOC temperature is monitoring by BMC
+  if ((fru == FRU_SCC) && (snr_num != SCC_IOC_TEMP)) {
+    return 1;
+  }
+
+  return 0;
 }

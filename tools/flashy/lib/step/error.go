@@ -35,6 +35,7 @@ const (
 	FLASHY_ERROR_UNKNOWN          = 1
 	FLASHY_ERROR_SAFE_TO_REBOOT   = 42
 	FLASHY_ERROR_UNSAFE_TO_REBOOT = 52
+  FLASHY_ERROR_BROKEN_SYSTEM    = 53
 )
 
 type StepExitError interface {
@@ -49,6 +50,10 @@ type ExitSafeToReboot struct {
 
 type ExitUnsafeToReboot struct {
 	Err error
+}
+
+type ExitBadFlashChip struct {
+  Err error
 }
 
 type ExitUnknownError struct {
@@ -77,6 +82,18 @@ func (e ExitUnsafeToReboot) GetExitCode() int {
 
 func (e ExitUnsafeToReboot) GetType() string {
 	return "ExitUnsafeToReboot"
+}
+
+func (e ExitBadFlashChip) GetError() string {
+	return e.Err.Error()
+}
+
+func (e ExitBadFlashChip) GetExitCode() int {
+	return FLASHY_ERROR_BROKEN_SYSTEM
+}
+
+func (e ExitBadFlashChip) GetType() string {
+	return "ExitBadFlashChip"
 }
 
 func (e ExitUnknownError) GetError() string {
@@ -120,13 +137,15 @@ func HandleStepError(err StepExitError) {
 		exit(err.GetExitCode())
 
 	case ExitUnsafeToReboot,
-		ExitUnknownError:
+		ExitUnknownError,
+    ExitBadFlashChip:
 
 		encodeExitError(err)
 		exit(err.GetExitCode())
+
 	default:
 		// this should not happen as there are no other types
-		log.Printf("Unknown error")
+		log.Printf("Unknown error $v", err)
 		exit(FLASHY_ERROR_UNKNOWN)
 	}
 }

@@ -29,7 +29,7 @@
 #define DEVICE_KEY "sys_config/fru%d_B_drive0_model_name"
 #define FAN0_PATH "/sys/class/hwmon/hwmon0/fan0_input"
 
-#define DUAL_FAN_UCR 13800
+#define DUAL_FAN_UCR 13500
 #define DUAL_FAN_UNC 10200
 
 enum {
@@ -97,6 +97,8 @@ const uint8_t bmc_sensor_list[] = {
   BMC_SENSOR_P1V0_STBY,
   BMC_SENSOR_P0V6_STBY,
   BMC_SENSOR_P3V3_RGM_STBY,
+  BMC_SENSOR_P5V_USB,
+  BMC_SENSOR_P3V3_NIC,
   BMC_SENSOR_HSC_TEMP,
   BMC_SENSOR_HSC_VIN,
   BMC_SENSOR_HSC_PIN,
@@ -843,11 +845,11 @@ PAL_SENSOR_MAP sensor_map[] = {
   {"BMC_SENSOR_MEDUSA_PWR", 0xD1, read_medusa_val, 0, {1800, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xD1
   {"BMC_SENSOR_NIC_P12V", ADC12, read_adc_val, true, {13.23, 0, 0, 11.277, 0, 0, 0, 0}, VOLT},//0xD2
   {"BMC_SENSOR_NIC_PWR" , 0xD3, read_cached_val, true, {82.5, 0, 101.875, 0, 0, 0, 0, 0}, POWER},//0xD3
-  {"BMC_SENSOR_P1V0_STBY", ADC7, read_adc_val, true, {1.07, 1.05, 1.13, 0.93, 0.83, 0.95, 0, 0}, VOLT}, //0xD4
-  {"BMC_SENSOR_P0V6_STBY", ADC8, read_adc_val, true, {0.642, 0.63, 0, 0.558, 0, 0.57, 0, 0}, VOLT}, //0xD5
-  {"BMC_SENSOR_P3V3_RGM_STBY", ADC13, read_adc_val, true, {3.531, 3.465, 0, 3.069, 0, 3.135, 0, 0}, VOLT}, //0xD6
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xD7
-  {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xD8
+  {"BMC_SENSOR_P1V0_STBY", ADC7, read_adc_val, true, {1.07, 1.05, 1.13, 0.93, 0.95, 0.83, 0, 0}, VOLT}, //0xD4
+  {"BMC_SENSOR_P0V6_STBY", ADC8, read_adc_val, true, {0.642, 0.63, 0, 0.558, 0.57, 0, 0, 0}, VOLT}, //0xD5
+  {"BMC_SENSOR_P3V3_RGM_STBY", ADC13, read_adc_val, true, {3.531, 3.465, 0, 3.069, 3.135, 0, 0, 0}, VOLT}, //0xD6
+  {"BMC_SENSOR_P5V_USB", ADC4, read_adc_val, 0, {5.35, 5.25, 5.65, 4.65, 4.75, 4.15, 0, 0}, VOLT}, //0xD7
+  {"BMC_SENSOR_P3V3_NIC", ADC14, read_adc_val, 0, {3.63, 3.564, 3.729, 2.97, 3.036, 2.95, 0, 0}, VOLT}, //0xD8
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xD9
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xDA
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xDB
@@ -869,18 +871,18 @@ PAL_SENSOR_MAP sensor_map[] = {
   {"BMC_SENSOR_PWM2", PWM_2, read_fan_pwm, true, {0, 0, 0, 0, 0, 0, 0, 0}, PERCENT}, //0xEA
   {"BMC_SENSOR_PWM3", PWM_3, read_fan_pwm, true, {0, 0, 0, 0, 0, 0, 0, 0}, PERCENT}, //0xEB
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xEC
-  {"BMC_INLET_TEMP",  TEMP_INLET,  read_temp, true, {50, 0, 0, 0, 0, 0, 0, 0}, TEMP}, //0xED
-  {"BMC_OUTLET_TEMP", TEMP_OUTLET, read_temp, true, {55, 0, 0, 0, 0, 0, 0, 0}, TEMP}, //0xEE
+  {"BMC_INLET_TEMP",  TEMP_INLET,  read_temp, true, {50, 0, 150, 0, 0, 0, 0, 0}, TEMP}, //0xED
+  {"BMC_OUTLET_TEMP", TEMP_OUTLET, read_temp, true, {55, 0, 150, 0, 0, 0, 0, 0}, TEMP}, //0xEE
   {"NIC_SENSOR_TEMP", TEMP_NIC, read_temp, true, {105, 0, 120, 0, 0, 0, 0, 0}, TEMP}, //0xEF
   {"BMC_SENSOR_P5V", ADC0, read_adc_val, true, {5.5, 5.4, 5.65, 4.5, 4.15, 4.6, 0, 0}, VOLT}, //0xF0
   {"BMC_SENSOR_P12V", ADC1, read_adc_val, true, {13.2, 12.96, 14.333, 10.08, 10.091, 11.04, 0, 0}, VOLT}, //0xF1
-  {"BMC_SENSOR_P3V3_STBY", ADC2, read_adc_val, true, {3.531, 3.465, 3.729, 3.069, 2.739, 3.135, 0, 0}, VOLT}, //0xF2
-  {"BMC_SENSOR_P1V8_STBY", ADC5, read_adc_val, true, {1.926, 1.89, 0, 1.674, 0, 1.71, 0, 0}, VOLT}, //0xF3
-  {"BMC_SENSOR_P1V2_STBY", ADC6, read_adc_val, true, {1.284, 1.26, 1.356, 1.116, 0.996, 1.14, 0, 0}, VOLT}, //0xF4
+  {"BMC_SENSOR_P3V3_STBY", ADC2, read_adc_val, true, {3.531, 3.465, 3.729, 3.069, 3.135, 2.739, 0, 0}, VOLT}, //0xF2
+  {"BMC_SENSOR_P1V8_STBY", ADC5, read_adc_val, true, {1.926, 1.89, 0, 1.674, 1.71, 0, 0, 0}, VOLT}, //0xF3
+  {"BMC_SENSOR_P1V2_STBY", ADC6, read_adc_val, true, {1.284, 1.26, 1.356, 1.116, 1.14, 0.996, 0, 0}, VOLT}, //0xF4
   {"BMC_SENSOR_P2V5_STBY", ADC3, read_adc_val, true, {2.675, 2.625, 0, 2.325, 2.375, 0, 0, 0}, VOLT}, //0xF5
   {"BMC_SENSOR_MEDUSA_VOUT", 0xF6, read_medusa_val, true, {13.75, 13.5, 13.9, 11.25, 9.25, 11.5, 0, 0}, VOLT}, //0xF6
-  {"BMC_SENSOR_HSC_VIN", HSC_ID0, read_hsc_vin, true, {13.2, 12.96, 14.333, 10.8, 10.091, 11.04, 0, 0}, VOLT}, //0xF7
-  {"BMC_SENSOR_HSC_TEMP", HSC_ID0, read_hsc_temp, true, {55, 0, 0, 0, 0, 0, 0, 0}, TEMP}, //0xF8
+  {"BMC_SENSOR_HSC_VIN", HSC_ID0, read_hsc_vin, true, {13.2, 12.96, 14.333, 10.8, 11.04, 10.091, 0, 0}, VOLT}, //0xF7
+  {"BMC_SENSOR_HSC_TEMP", HSC_ID0, read_hsc_temp, true, {55, 0, 125, 0, 0, 0, 0, 0}, TEMP}, //0xF8
   {"BMC_SENSOR_HSC_PIN" , HSC_ID0, read_hsc_pin , true, {287.5, 0, 398.75, 0, 0, 0, 0, 0}, POWER}, //0xF9
   {"BMC_SENSOR_HSC_IOUT", HSC_ID0, read_hsc_iout, true, {23, 0, 31.9, 0, 0, 0, 0, 0}, CURR}, //0xFA
   {"BMC_SENSOR_FAN_IOUT", ADC10, read_adc_val, 0, {14.52, 0, 39.2, 0, 0, 0, 0, 0}, CURR}, //0xFB
@@ -1018,7 +1020,7 @@ pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt) {
   case FRU_SLOT4:
     memcpy(bic_dynamic_sensor_list[fru-1], bic_sensor_list, bic_sensor_cnt);
     current_cnt = bic_sensor_cnt;
-    config_status = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+    config_status = bic_is_m2_exp_prsnt(fru);
     if (config_status < 0) config_status = 0;
 
     // 1OU
@@ -1178,17 +1180,17 @@ int pal_set_fan_speed(uint8_t fan, uint8_t pwm)
       return -1;
     }
     snprintf(cmd, sizeof(cmd), "sv status fscd | grep run | wc -l");
-    if((fp = popen(cmd, "r")) == NULL) {
+    if ((fp = popen(cmd, "r"))) {
+      if (fgets(buf, sizeof(buf), fp)) {
+        res = atoi(buf);
+        if (res == 0) {
+          is_fscd_run = false;
+        }
+      }
+      pclose(fp);
+    } else {
       is_fscd_run = false;
     }
-
-    if(fgets(buf, sizeof(buf), fp) != NULL) {
-      res = atoi(buf);
-      if(res == 0) {
-        is_fscd_run = false;
-      }
-    }
-    pclose(fp);
 
     if ( (status == MANUAL_MODE) && (!is_fscd_run) ) {
       return bic_manual_set_fan_speed(fan, pwm);
@@ -1651,7 +1653,7 @@ read_medusa_val(uint8_t snr_number, float *value) {
 }
 
 static int
-read_temp(uint8_t id, float *value) {
+read_temp(uint8_t snr_id, float *value) {
   struct {
     const char *chip;
     const char *label;
@@ -1661,11 +1663,11 @@ read_temp(uint8_t id, float *value) {
     {"tmp421-i2c-8-1f", "NIC_SENSOR_TEMP"},
     {"lm75-i2c-2-4f",  "BMC_OUTLET_TEMP"},
   };
-  if (id >= ARRAY_SIZE(devs)) {
+  if (snr_id >= ARRAY_SIZE(devs)) {
     return -1;
   }
 
-  return sensors_read(devs[id].chip, devs[id].label, value);
+  return sensors_read(devs[snr_id].chip, devs[snr_id].label, value);
 }
 
 static int
@@ -1683,7 +1685,7 @@ read_adc_val(uint8_t adc_id, float *value) {
     "BMC_SENSOR_P12V",
     "BMC_SENSOR_P3V3_STBY",
     "BMC_SENSOR_P2V5_STBY",
-    "Dummy sensor",
+    "BMC_SENSOR_P5V_USB",
     "BMC_SENSOR_P1V8_STBY",
     "BMC_SENSOR_P1V2_STBY",
     "BMC_SENSOR_P1V0_STBY",
@@ -1693,6 +1695,7 @@ read_adc_val(uint8_t adc_id, float *value) {
     "BMC_SENSOR_NIC_IOUT",
     "BMC_SENSOR_NIC_P12V",
     "BMC_SENSOR_P3V3_RGM_STBY",
+    "BMC_SENSOR_P3V3_NIC",
   };
 
   ret = pal_get_fan_type(&bmc_location, &fan_type);
@@ -2031,7 +2034,7 @@ pal_bic_sensor_read_raw(uint8_t fru, uint8_t sensor_num, float *value, uint8_t b
   }
 
   //check snr number first. If it not holds, it will move on
-  if ( (sensor_num >= 0x0) && (sensor_num <= 0x42) ) { //server board
+  if (sensor_num <= 0x42) { //server board
     ret = bic_get_sensor_reading(fru, sensor_num, &sensor, NONE_INTF);
   } else if ( (sensor_num >= 0x50 && sensor_num <= 0x7F) && (bmc_location != NIC_BMC) && //1OU
        ((config_status & PRESENT_1OU) == PRESENT_1OU) ) {

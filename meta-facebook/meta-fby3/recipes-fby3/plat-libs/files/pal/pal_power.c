@@ -410,7 +410,13 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       if ( bmc_location == NIC_BMC || pal_get_server_12v_power(fru, &status) < 0 ) {
         return POWER_STATUS_ERR;
       }
-      return (status == SERVER_12V_ON)?POWER_STATUS_ALREADY_OK:server_power_12v_on(fru);
+      if (status == SERVER_12V_ON) {
+        pal_power_policy_control(fru, NULL);
+        return POWER_STATUS_ALREADY_OK;
+      } else {
+        return server_power_12v_on(fru);
+      }
+
       break;
 
     case SERVER_12V_OFF:
@@ -1266,6 +1272,7 @@ int
 pal_set_exp_12v_on(uint8_t fru, bool pwr_on) {
   int i2cfd = BIC_STATUS_FAILURE;
   int ret = BIC_STATUS_FAILURE;
+  int ina_alert_ret = BIC_STATUS_SUCCESS;
   int bus = 0;
   uint8_t tbuf[2] = {0x0};
   uint8_t rbuf = 0x0;
@@ -1273,6 +1280,12 @@ pal_set_exp_12v_on(uint8_t fru, bool pwr_on) {
   uint8_t rlen = 0x0;
   uint8_t retry = MAX_READ_RETRY;
   uint8_t gpv3_hsc = 0;
+
+  if (!pwr_on) {
+    if (bic_enable_ina233_alert(fru, false)) {
+      syslog(LOG_WARNING, "%s() Failed to disable INA233 Alert", __func__);
+    }
+  }
 
   switch (fru) {
     case FRU_CWC:
@@ -1284,9 +1297,10 @@ pal_set_exp_12v_on(uint8_t fru, bool pwr_on) {
       bus = FRU_SLOT1 + SLOT_BUS_BASE;
       tbuf[0] = REG_CWC_CPLD_GPV3_HSC;
 
-      if (pal_get_gpv3_hsc(bus, &gpv3_hsc)) {
+      ina_alert_ret = pal_get_gpv3_hsc(bus, &gpv3_hsc);
+      if ( ina_alert_ret < 0 ) {
         syslog(LOG_WARNING, "%s() Failed to get gpv3 hsc", __func__);
-        return -1;
+        goto error_exit;
       }
 
       tbuf[1] = pwr_on ? (gpv3_hsc | 0x01) : (gpv3_hsc & ~0x01);
@@ -1295,22 +1309,25 @@ pal_set_exp_12v_on(uint8_t fru, bool pwr_on) {
       bus = FRU_SLOT1 + SLOT_BUS_BASE;
       tbuf[0] = REG_CWC_CPLD_GPV3_HSC;
 
-      if (pal_get_gpv3_hsc(bus, &gpv3_hsc)) {
+      ina_alert_ret = pal_get_gpv3_hsc(bus, &gpv3_hsc);
+      if ( ina_alert_ret < 0 ) {
         syslog(LOG_WARNING, "%s() Failed to get gpv3 hsc", __func__);
-        return -1;
+        goto error_exit;
       }
 
       tbuf[1] = pwr_on ? (gpv3_hsc | 0x02) : (gpv3_hsc & ~0x02);
       break;
     default:
       printf("unknown expantion fru : %d\n", fru);
-      return POWER_STATUS_FRU_ERR;
+      ina_alert_ret = POWER_STATUS_FRU_ERR;
+      goto error_exit;
   }
 
   i2cfd = i2c_cdev_slave_open(bus, CWC_CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
   if ( i2cfd < 0 ) {
+    ina_alert_ret = i2cfd;
     syslog(LOG_WARNING, "%s() Failed to open i2c device %d", __func__, CWC_CPLD_ADDRESS);
-    return i2cfd;
+    goto error_exit;
   }
 
   do {
@@ -1323,13 +1340,21 @@ pal_set_exp_12v_on(uint8_t fru, bool pwr_on) {
   } while( retry-- > 0 );
 
   if ( ret < 0 ) {
+    ina_alert_ret = ret;
     syslog(LOG_WARNING, "%s() Failed to do i2c_rdwr_msg_transfer, tlen=%d", __func__, tlen);
   }
 
   if ( i2cfd > 0 ) {
     close(i2cfd);
   }
-  return 0;
+
+error_exit:
+  if ( !pwr_on && ina_alert_ret < 0 ) {
+    if (bic_enable_ina233_alert(fru, true)) {
+      syslog(LOG_WARNING, "%s() Failed to disable INA233 Alert", __func__);
+    }
+  }
+  return ina_alert_ret;
 }
 
 int
@@ -1372,6 +1397,10 @@ int
 pal_set_exp_power(uint8_t fru, uint8_t cmd) {
   uint8_t status = 0;
 
+  if (pal_is_fw_update_ongoing(FRU_SLOT1)) {
+    printf("fw update is on going on fru:%d...\n", FRU_SLOT1);
+    return POWER_STATUS_ERR;
+  }
   if (pal_get_exp_power(fru, &status) < 0) {
     return POWER_STATUS_ERR;
   }

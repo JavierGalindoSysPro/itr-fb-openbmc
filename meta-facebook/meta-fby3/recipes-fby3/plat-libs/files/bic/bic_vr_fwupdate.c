@@ -31,6 +31,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/file.h>
+#include <time.h>
 #include "bic_vr_fwupdate.h"
 #include "bic_ipmi.h"
 
@@ -1035,6 +1036,7 @@ vr_usb_program(uint8_t slot_id, uint8_t sel_vendor, uint8_t comp, vr *dev, uint8
   uint8_t *buf = NULL;
   uint8_t remaining_writes = 0x00;
   uint8_t vy_vr_idx = 0;
+  struct timespec slp_time;
 
   //select PID/VID
   switch(dev->intf) {
@@ -1108,6 +1110,14 @@ vr_usb_program(uint8_t slot_id, uint8_t sel_vendor, uint8_t comp, vr *dev, uint8
   udev->epaddr = 0x1;
 
   bic_set_gpio(slot_id, GPIO_RST_USB_HUB, VALUE_HIGH);
+
+  if ((comp >= FW_CWC_PESW_VR && comp <= FW_GPV3_BOT_PESW_VR) ||
+      (comp >= FW_2U_TOP_3V3_VR1 && comp <= FW_2U_TOP_1V8_VR) ||
+      (comp >= FW_2U_BOT_3V3_VR1 && comp <= FW_2U_BOT_1V8_VR)) {
+    slp_time.tv_sec = 6;
+    slp_time.tv_nsec = 0;
+    nanosleep(&slp_time, NULL); //wait for usb devices to be init
+  }
 
   switch(comp) {
     case FW_CWC_PESW_VR:
@@ -1212,8 +1222,6 @@ vr_usb_program(uint8_t slot_id, uint8_t sel_vendor, uint8_t comp, vr *dev, uint8
 error_exit:
   if ( buf != NULL ) free(buf);
   bic_close_usb_dev(udev);
-  bic_set_gpio(slot_id, GPIO_RST_USB_HUB, VALUE_LOW);
-
   return ret;
 }
 
@@ -1228,14 +1236,14 @@ struct dev_table {
   {NONE_INTF,     VR_SB_BUS,  VCCIO_ADDR,        "VCCIO",         FW_VR},
   {NONE_INTF,     VR_SB_BUS,  VDDQ_ABC_ADDR,     "VDDQ_ABC",      FW_VR},
   {NONE_INTF,     VR_SB_BUS,  VDDQ_DEF_ADDR,     "VDDQ_DEF",      FW_VR},
-  {REXP_BIC_INTF, VR_2OU_BUS, VR_PESW_ADDR,      "VR_P0V84/P0V9", FW_2OU_PESW_VR},
+  {REXP_BIC_INTF, VR_2OU_BUS, VR_PESW_ADDR,      "VR_P0V84", FW_2OU_PESW_VR},
   {REXP_BIC_INTF, VR_2OU_BUS, VR_2OU_P3V3_STBY1, "VR_P3V3_STBY1", FW_2OU_3V3_VR1},
   {REXP_BIC_INTF, VR_2OU_BUS, VR_2OU_P3V3_STBY2, "VR_P3V3_STBY2", FW_2OU_3V3_VR2},
   {REXP_BIC_INTF, VR_2OU_BUS, VR_2OU_P3V3_STBY3, "VR_P3V3_STBY3", FW_2OU_3V3_VR3},
   {REXP_BIC_INTF, VR_2OU_BUS, VR_2OU_P1V8,       "VR_P1V8",       FW_2OU_1V8_VR},
   {REXP_BIC_INTF, VR_CWC_BUS, VCCIN_ADDR,        "VR_P1V8/P0V84", FW_CWC_PESW_VR},
-  {RREXP_BIC_INTF1, VR_2OU_BUS, VR_PESW_ADDR,    "VR_P0V84/P0V9", FW_GPV3_TOP_PESW_VR},
-  {RREXP_BIC_INTF2, VR_2OU_BUS, VR_PESW_ADDR,    "VR_P0V84/P0V9", FW_GPV3_BOT_PESW_VR},
+  {RREXP_BIC_INTF1, VR_2OU_BUS, VR_PESW_ADDR,    "VR_P0V84", FW_GPV3_TOP_PESW_VR},
+  {RREXP_BIC_INTF2, VR_2OU_BUS, VR_PESW_ADDR,    "VR_P0V84", FW_GPV3_BOT_PESW_VR},
   {RREXP_BIC_INTF1, VR_2OU_BUS, VR_2OU_P3V3_STBY1, "VR_P3V3_STBY1", FW_2U_TOP_3V3_VR1},
   {RREXP_BIC_INTF1, VR_2OU_BUS, VR_2OU_P3V3_STBY2, "VR_P3V3_STBY2", FW_2U_TOP_3V3_VR2},
   {RREXP_BIC_INTF1, VR_2OU_BUS, VR_2OU_P3V3_STBY3, "VR_P3V3_STBY3", FW_2U_TOP_3V3_VR3},

@@ -1191,7 +1191,7 @@ bmc_health_monitor()
   return NULL;
 }
 
-void check_nm_selftest_result(uint8_t fru, int result)
+void check_nm_selftest_result(uint8_t fru, int result, uint8_t *selftest_result)
 {
   static uint8_t no_response_retry[MAX_NUM_FRUS] = {0};
   static uint8_t abnormal_status_retry[MAX_NUM_FRUS] = {0};
@@ -1234,7 +1234,7 @@ void check_nm_selftest_result(uint8_t fru, int result)
         if ( !is_duplicated_abnormal_event[fru_index] )
         {
           is_duplicated_abnormal_event[fru_index] = true;
-          syslog(LOG_CRIT, "ASSERT: ME Status - Controller Access Degraded or Unavailable on the %s", fru_name);
+          syslog(LOG_CRIT, "ASSERT: ME Status - Controller Access Degraded or Unavailable on the %s, result: %02Xh, %02Xh", fru_name, selftest_result[0], selftest_result[1]);
         }
       }
       else
@@ -1282,7 +1282,7 @@ nm_selftest(uint8_t fru) {
       //if nm has no response, suppose it is in the not support state
       result = PAL_ENOTSUP;
     }
-    check_nm_selftest_result(fru, result);
+    check_nm_selftest_result(fru, result, data);
   }
 }
 
@@ -1731,6 +1731,13 @@ bic_health_monitor() {
     if ((pal_get_server_12v_power(bic_fru, &status) < 0) || (status == SERVER_12V_OFF)) {
       goto next_run;
     }
+    
+    // Check if bic is updating
+    if (pal_is_fw_update_ongoing(bic_fru) == true) {
+      err_cnt = 0;
+      sleep(BIC_HEALTH_INTERVAL);
+      continue;
+    }
 
     // Read BIC ready pin to check BIC boots up completely
     if ((pal_is_bic_ready(bic_fru, &status) < 0) || (status == false)) {
@@ -1761,6 +1768,7 @@ next_run:
     if ((err_cnt >= BIC_RESET_ERR_CNT) && (is_already_reset == false)) {
       // if error counter over 3, reset BIC by hardware
       if (pal_bic_hw_reset() == 0) {
+        memset(err_log, 0, sizeof(err_log));
         for (i = 0; i < BIC_RESET_ERR_CNT; i++) {
           type = err_type[i];
           strcat(err_log, err_str[type]);

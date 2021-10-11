@@ -2446,3 +2446,115 @@ bic_bypass_to_another_bmc(uint8_t* data, uint8_t len) {
 
   return 0;
 }
+
+int
+bic_enable_ina233_alert(uint8_t fru, bool enable) {
+  uint8_t tbuf[5] = {0x00};
+  uint8_t tlen = sizeof(tbuf);
+  uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
+  uint8_t rlen = 0;
+  uint8_t ret = BIC_STATUS_FAILURE;
+  // File the IANA ID
+  memcpy(tbuf, (uint8_t *)&IANA_ID, 3);
+  tbuf[3] = 0x1;
+  tbuf[4] = enable?0x0:0x1;
+
+  switch(fru) {
+    case FRU_2U_TOP:
+      ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_INA233_ALERT_CTRL, tbuf, tlen, rbuf, &rlen, RREXP_BIC_INTF1);
+      break;
+    case FRU_2U_BOT:
+      ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_INA233_ALERT_CTRL, tbuf, tlen, rbuf, &rlen, RREXP_BIC_INTF2);
+      break;
+    case FRU_CWC:
+      ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_INA233_ALERT_CTRL, tbuf, tlen, rbuf, &rlen, RREXP_BIC_INTF1);
+      if ( ret != BIC_STATUS_SUCCESS ) break;
+      ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, BIC_CMD_OEM_INA233_ALERT_CTRL, tbuf, tlen, rbuf, &rlen, RREXP_BIC_INTF2);
+      if ( ret != BIC_STATUS_SUCCESS ) break;
+      break;
+    default:
+      printf("not expantion fru: %d\n", fru);
+      return ret;
+  }
+  return ret;
+}
+
+int
+cpld_update_flag(uint8_t slot_id, uint8_t data, uint8_t read_cnt, uint8_t *rbuf) {
+  int ret = BIC_STATUS_SUCCESS;
+  int retries = RETRY_3_TIME;
+  uint8_t txbuf[32] = {0};
+  uint8_t rxbuf[32] = {0};
+  uint8_t txlen = 0;
+  uint8_t rxlen = 0;
+
+  txbuf[0] = CPLD_BB_BUS;
+  txbuf[1] = CPLD_FLAG_REG_ADDR;
+  txbuf[2] = read_cnt;
+  txbuf[3] = 0x0D;
+  //only do one action at the time.
+  //use read_cnt to check which actions should be performed.
+  if ( read_cnt > 0 ) {
+    txlen = 4;
+  } else {
+    txbuf[4] = data;
+    txlen = 5;
+  }
+
+  do {
+    ret = bic_ipmb_send(slot_id, NETFN_APP_REQ, CMD_APP_MASTER_WRITE_READ, txbuf, txlen, rxbuf, &rxlen, BB_BIC_INTF);
+    if ( ret < 0 ) {
+      sleep(1);
+    } else break;
+  } while ( retries-- > 0 );
+
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Failed to set/get the flag of CPLD", __func__);
+  } else {
+    if ( read_cnt > 0 ) {
+      *rbuf = rxbuf[0];
+    }
+  }
+
+  return ret;
+}
+
+// In class 2 system, to prevent two BMC update bb firmware at the same time,
+// use BB CPLD register to determine whether to update firmware or not.
+// 1. Read the register to check no one is updating.
+// 2. Set register to notify the update will be started.
+// 3. Check the register not be overrided by another BMC.
+int
+bb_fw_update_prepare(uint8_t slot_id) {
+  uint8_t mb_index;
+  uint8_t rxbuf = 0x0;
+
+  if (cpld_update_flag(slot_id, 0x0, 1, &rxbuf) || rxbuf != 0) {
+    syslog(LOG_WARNING, "another slot is updating baseboard firmware");
+    return -1;
+  }
+
+  if (bic_get_mb_index(&mb_index) < 0) {
+    syslog(LOG_WARNING, "Failed to get MB index");
+    return -1;
+  }
+  // write register to notify update wiil be started
+  if (cpld_update_flag(slot_id, mb_index, 0, NULL)) {
+    return -1;
+  }
+  sleep(1);
+  if (cpld_update_flag(slot_id, 0x0, 1, &rxbuf)) {
+    return -1;
+  }
+  if (rxbuf != mb_index) {
+    syslog(LOG_WARNING, "slot%d is updating baseboard firmware", mb_index);
+    return -1;
+  }
+
+  return 0;
+}
+
+int
+bb_fw_update_finish(uint8_t slot_id) {
+  return cpld_update_flag(slot_id, 0x0, 0, NULL);
+}

@@ -161,7 +161,7 @@
 
 #define NCSI_DATA_PAYLOAD     64
 #define NCSI_MIN_DATA_PAYLOAD 36
-#define NCSI_RETRY_MAX        2
+#define NCSI_RETRY_MAX        5
 #define BRCM_POWERUP_PRE_CMD  0x1A
 
 #if defined CONFIG_FBY2_ND
@@ -1403,6 +1403,7 @@ power_on_server_physically(uint8_t slot_id){
 
 static int
 nic_powerup_prep(uint8_t slot_id, uint8_t reinit_type) {
+  bool is_done = false;
   uint8_t ret = 0, retry = 0, cc = 0;
   uint8_t buf[NCSI_DATA_PAYLOAD] = {0};
   uint8_t channel = 0;
@@ -1452,18 +1453,24 @@ nic_powerup_prep(uint8_t slot_id, uint8_t reinit_type) {
     msg->msg_payload[15] = slot_id;
 
     do {
+      retry++;
       rsp = send_nl_msg_libnl(msg);
+      if (rsp == NULL) {
+        continue;
+      }
       cc = (rsp->msg_payload[0]<<8) + rsp->msg_payload[1];
       if (cc == RESP_COMMAND_COMPLETED ) {
+        is_done = true;
         break;
       }
-      retry++;
     } while (retry < NCSI_RETRY_MAX);
 
-    if (cc != RESP_COMMAND_COMPLETED) {
+    if (!is_done) {
       printf("Power-up prepare command failed!\n");
       ret = -1;
-      print_ncsi_completion_codes(rsp);
+      if (rsp != NULL) {
+        print_ncsi_completion_codes(rsp);
+      }
     } else {
       syslog(LOG_INFO, "Power-up perpare is done");
     }
@@ -7099,6 +7106,9 @@ pal_get_fru_health(uint8_t fru, uint8_t *value) {
     case FRU_NIC:
       sprintf(key, "nic_sensor_health");
       break;
+    case FRU_BMC:
+      // not available
+      return ERR_SENSOR_NA;
 
     default:
       return -1;
@@ -9313,29 +9323,6 @@ pal_can_change_power(uint8_t fru)
     default:
       return true;
   }
-}
-
-int
-pal_set_fw_update_ongoing(uint8_t fruid, uint16_t tmout) {
-  char key[64] = {0};
-  char value[64] = {0};
-  struct timespec ts;
-
-  if (fruid == FRU_BMC) {    //BMC update action belongs to SPB range
-    fruid = FRU_SPB;
-  }
-
-  sprintf(key, "fru%d_fwupd", fruid);
-
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  ts.tv_sec += tmout;
-  sprintf(value, "%ld", ts.tv_sec);
-
-  if (kv_set(key, value, 0, 0) < 0) {
-     return -1;
-  }
-
-  return 0;
 }
 
 int

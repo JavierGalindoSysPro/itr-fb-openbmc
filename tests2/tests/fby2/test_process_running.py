@@ -20,22 +20,16 @@
 import unittest
 
 from common.base_process_running_test import BaseProcessRunningTest
+from utils.test_utils import qemu_check
 
 
 class ProcessRunningTest(BaseProcessRunningTest, unittest.TestCase):
     def set_processes(self):
         self.expected_process = [
-            "fscd",
             "sshd",
             "dhclient -6 -d -D LL -pf /var/run/dhclient6.eth0.pid eth0",
-            "/usr/local/bin/mTerm_server slot1 /dev/ttyS1",
-            "/usr/local/bin/mTerm_server slot2 /dev/ttyS2",
-            "/usr/local/bin/mTerm_server slot3 /dev/ttyS3",
-            "/usr/local/bin/mTerm_server slot4 /dev/ttyS4",
-            "/usr/local/bin/sensord slot1 slot2 slot3 slot4 spb nic",
             "healthd",
             "gpiointrd",
-            "/usr/local/bin/gpiod slot1 slot2 slot3 slot4",
             "ntpd",
             "ipmid",
             "ncsid",
@@ -46,3 +40,14 @@ class ProcessRunningTest(BaseProcessRunningTest, unittest.TestCase):
             "/usr/local/bin/ipmbd 5 3",
             "/usr/local/bin/ipmbd 7 4",
         ]
+        if not qemu_check():
+            self.expected_process.extend(
+                [
+                    "fscd",
+                    "/usr/local/bin/gpiod slot1 slot2 slot3 slot4",
+                    "/usr/local/bin/mTerm_server slot1 /dev/ttyS1",
+                    "/usr/local/bin/mTerm_server slot2 /dev/ttyS2",
+                    "/usr/local/bin/mTerm_server slot3 /dev/ttyS3",
+                    "/usr/local/bin/mTerm_server slot4 /dev/ttyS4",
+                ]
+            )

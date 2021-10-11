@@ -87,6 +87,14 @@ struct pal_key_cfg {
   {KEY_PDB_SNR_HEALTH, "1", NULL},
   {KEY_CARRIER1_SNR_HEALTH, "1", NULL},
   {KEY_CARRIER2_SNR_HEALTH, "1", NULL},
+  {KEY_NIC0_SNR_HEALTH, "1", NULL},
+  {KEY_NIC1_SNR_HEALTH, "1", NULL},
+  {KEY_NIC2_SNR_HEALTH, "1", NULL},
+  {KEY_NIC3_SNR_HEALTH, "1", NULL},
+  {KEY_NIC4_SNR_HEALTH, "1", NULL},
+  {KEY_NIC5_SNR_HEALTH, "1", NULL},
+  {KEY_NIC6_SNR_HEALTH, "1", NULL},
+  {KEY_NIC7_SNR_HEALTH, "1", NULL},
   {"ntp_server", "", NULL},
   /* Add more Keys here */
   {LAST_KEY, LAST_KEY, NULL} /* This is the last key of the list */
@@ -126,7 +134,7 @@ int pal_get_fru_id(char *str, uint8_t *fru)
   if (!strcmp(str, "all")) {
     *fru = FRU_ALL;
   } else if (!strcmp(str, "mb") || !strcmp(str, "vr") ||
-             !strcmp(str, "bmc") || !strcmp(str, "nic")) {
+             !strcmp(str, "bmc")) {
     *fru = FRU_MB;
   } else if (!strcmp(str, "bsm")) {
     *fru = FRU_BSM;
@@ -662,6 +670,38 @@ int pal_set_def_key_value()
 
     memset(key, 0, MAX_KEY_LEN);
     strcpy(key, KEY_CARRIER2_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC0_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC1_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC2_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC3_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC4_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC5_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC6_SNR_HEALTH);
+    pal_set_key_value(key, "1");
+
+    memset(key, 0, MAX_KEY_LEN);
+    strcpy(key, KEY_NIC7_SNR_HEALTH);
     pal_set_key_value(key, "1");
 
   }

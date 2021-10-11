@@ -41,6 +41,7 @@ from node_mezz import get_node_mezz
 from node_sensors import get_node_sensors
 from node_server import get_node_device, get_node_server
 from node_spb import get_node_spb
+from rest_fwinfo import rest_fwinfo_handler
 from rest_pal_legacy import pal_is_fru_prsnt, pal_get_num_slots
 
 
@@ -174,7 +175,7 @@ def setup_board_routes(app: Application, write_enabled: bool):
     spb_shim = RestShim(get_node_spb(), "/api/spb")
     app.router.add_get("/api/spb", spb_shim.get_handler)
     app.router.add_post("/api/spb", spb_shim.post_handler)
-    # Add /api/mezz to represent Network Mezzaine card
+    # Add /api/mezz to represent Network Mezzanine card
     mezz_shim = RestShim(get_node_mezz(), "/api/mezz")
     app.router.add_get("/api/mezz", mezz_shim.get_handler)
 
@@ -213,3 +214,4 @@ def setup_board_routes(app: Application, write_enabled: bool):
     nic_logs_shim = RestShim(get_node_logs("nic"), "/api/mezz/logs")
     app.router.add_get("/api/mezz/logs", nic_logs_shim.get_handler)
     app.router.add_post("/api/mezz/logs", nic_logs_shim.post_handler)
+    app.router.add_get("/api/fwinfo", rest_fwinfo_handler)

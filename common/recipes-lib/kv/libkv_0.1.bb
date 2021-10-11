@@ -25,7 +25,7 @@ LICENSE = "GPLv2"
 # Use GPL-2.0-only instead.
 def lic_file_name(d):
     distro = d.getVar('DISTRO_CODENAME', True)
-    if distro in [ 'rocko', 'zeus', 'dunfell', 'gatesgarth' ]:
+    if distro in [ 'rocko', 'zeus', 'dunfell' ]:
         return "GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 
     return "GPL-2.0-only;md5=801f80980d171dd6425610833a22dbe6"
@@ -53,12 +53,12 @@ SRC_URI = "\
 S = "${WORKDIR}"
 
 DEPENDS += "python3-setuptools"
-RDEPENDS_${PN} += "python3-core bash"
+RDEPENDS:${PN} += "python3-core bash"
 
-do_install_append() {
+do_install:append() {
     install -d ${D}${PYTHON_SITEPACKAGES_DIR}
     install -m 644 ${S}/kv.py ${D}${PYTHON_SITEPACKAGES_DIR}/
 }
-FILES_${PN} += "${PYTHON_SITEPACKAGES_DIR}/kv.py"
+FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR}/kv.py"
 
 BBCLASSEXTEND = "native nativesdk"

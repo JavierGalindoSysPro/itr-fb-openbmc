@@ -175,6 +175,22 @@ MAPTOSTRING root_port_common_mapping[] = {
     // DL
     { 0x63, 2, 0x2C, "Num 0", "SB" },   // PVT switch Num 1 to 0
     { 0x00, 0x1D, 0xFF, "Num 1", "SB"}, // PVT -> Remove
+
+    // CWC/GPv3 root port
+    { 0x15, 0, 0x1A, "CPU X16", "CWC/GPv3"}, //Port 0x1A
+    { 0x63, 0, 0x2A, "CPU X8",  "CWC/GPv3"}, //Port 0x2A
+
+    // CWC/GPv3 Up Strem Ports
+    { 0x16, 0, 0x1A, "USP X16", "CWC/GPv3"}, //Port 0x1A
+    { 0x64, 0, 0x2A, "USP X8",  "CWC/GPv3"}, //Port 0x2A
+
+    // CWC TOP/BOT USBP0
+    { 0x17, 0, 0x1A, "USP0", "TOP"}, //Port 0x1A
+    { 0x17, 1, 0x2A, "USP0", "BOT"}, //Port 0x2A
+
+    // CWC TOP/BOT USBP1
+    { 0x65, 0, 0x1A, "USP1", "TOP"}, //Port 0x1A
+    { 0x65, 1, 0x2A, "USP1", "BOT"}, //Port 0x2A
 };
 
 MAPTOSTRING root_port_mapping[] = {
@@ -190,44 +206,179 @@ MAPTOSTRING root_port_mapping[] = {
     { 0x15, 3, 0x1D, "Num 5", "2OU"}, //Port 0x1D
 };
 
-MAPTOSTRING root_port_mapping_gpv3[] = {
+// dual M2 for 4U
+MAPTOSTRING root_port_mapping_4u_dual_m2_gpv3[] = {
     // bus, device, port, silk screen, location
-    // Root Ports
-    { 0x15, 0, 0x1A, "CPU X16", "2OU"}, //Port 0x1A
-    { 0x63, 0, 0x2A, "CPU X8", "2OU"}, //Port 0x2A
-    // Up Strem Ports
-    { 0x16, 0, 0x1A, "USP X16", "2OU"}, //Port 0x1A
-    { 0x64, 0, 0x2A, "USP X8", "2OU"}, //Port 0x2A
     // Down Stream Ports
-    { 0x17, 0, 0x01, "Num 0", "2OU"},
-    { 0x17, 1, 0x02, "Num 1", "2OU"},
-    { 0x17, 2, 0x03, "Num 2", "2OU"},
-    { 0x17, 3, 0x04, "Num 3", "2OU"},
-    { 0x17, 4, 0x05, "Num 4", "2OU"},
-    { 0x17, 5, 0x06, "Num 5", "2OU"},
-    { 0x17, 6, 0x07, "Num 6", "2OU"},
-    { 0x17, 7, 0x08, "Num 7", "2OU"},
-    { 0x65, 0, 0x09, "Num 8", "2OU"},
-    { 0x65, 1, 0x0A, "Num 9", "2OU"},
+    { 0x20, 0, 0x01, "Num 1",  "BOT"},
+    { 0x20, 1, 0x02, "Num 3",  "BOT"},
+    { 0x20, 2, 0x03, "Num 5",  "BOT"},
+    { 0x20, 3, 0x04, "Num 7",  "BOT"},
+    { 0x6C, 0, 0x05, "Num 9",  "BOT"},
+    { 0x6C, 1, 0x06, "Num 11", "BOT"},
+    { 0x20, 4, 0x07, "E1S 0",  "BOT"},
+    { 0x6C, 2, 0x08, "E1S 1",  "BOT"},
+    { 0x1F, 0, 0x09, "PESW",   "BOT"},
+    { 0x6B, 0, 0x0A, "PESW",   "BOT"},
+
+    { 0x19, 0, 0x01, "Num 1",  "TOP"},
+    { 0x19, 1, 0x02, "Num 3",  "TOP"},
+    { 0x19, 2, 0x03, "Num 5",  "TOP"},
+    { 0x19, 3, 0x04, "Num 7",  "TOP"},
+    { 0x67, 0, 0x05, "Num 9",  "TOP"},
+    { 0x67, 1, 0x06, "Num 11", "TOP"},
+    { 0x19, 4, 0x07, "E1S 0",  "TOP"},
+    { 0x67, 2, 0x08, "E1S 1",  "TOP"},
+    { 0x18, 0, 0x09, "PESW",   "TOP"},
+    { 0x66, 0, 0x0A, "PESW",   "TOP"},
+
+    // End devices
+    { 0x21, 0, 0x01, "Num 1",  "BOT"},
+    { 0x22, 0, 0x02, "Num 3",  "BOT"},
+    { 0x23, 0, 0x03, "Num 5",  "BOT"},
+    { 0x24, 0, 0x04, "Num 7",  "BOT"},
+    { 0x6D, 0, 0x05, "Num 9",  "BOT"},
+    { 0x6E, 0, 0x06, "Num 11", "BOT"},
+    { 0x25, 0, 0x07, "E1S 0",  "BOT"},
+    { 0x6F, 0, 0x08, "E1S 1",  "BOT"},
+
+    { 0x1A, 0, 0x01, "Num 1",  "TOP"},
+    { 0x1B, 0, 0x02, "Num 3",  "TOP"},
+    { 0x1C, 0, 0x03, "Num 5",  "TOP"},
+    { 0x1D, 0, 0x04, "Num 7",  "TOP"},
+    { 0x68, 0, 0x05, "Num 9",  "TOP"},
+    { 0x69, 0, 0x06, "Num 11", "TOP"},
+    { 0x1E, 0, 0x07, "E1S 0",  "TOP"},
+    { 0x6A, 0, 0x08, "E1S 1",  "TOP"},
+};
+
+// singel M2 for 4U
+MAPTOSTRING root_port_mapping_4u_sgl_m2_gpv3[] = {
+    // bus, device, port, silk screen, location
+    // Down Stream Ports
+    { 0x24, 0, 0x01, "Num 0",  "BOT"},
+    { 0x24, 1, 0x02, "Num 1",  "BOT"},
+    { 0x24, 2, 0x03, "Num 2",  "BOT"},
+    { 0x24, 3, 0x04, "Num 3",  "BOT"},
+    { 0x24, 4, 0x05, "Num 4",  "BOT"},
+    { 0x24, 5, 0x06, "Num 5",  "BOT"},
+    { 0x24, 6, 0x07, "Num 6",  "BOT"},
+    { 0x24, 7, 0x08, "Num 7",  "BOT"},
+    { 0x6E, 0, 0x09, "Num 8",  "BOT"},
+    { 0x6E, 1, 0x0A, "Num 9",  "BOT"},
+    { 0x6E, 2, 0x0B, "Num 10", "BOT"},
+    { 0x6E, 3, 0x0C, "Num 11", "BOT"},
+    { 0x24, 8, 0x0D, "E1S 0",  "BOT"},
+    { 0x6E, 4, 0x0E, "E1S 1",  "BOT"},
+    { 0x23, 0, 0x0F, "PESW",   "BOT"},
+    { 0x6D, 0, 0x10, "PESW",   "BOT"},
+
+    { 0x19, 0, 0x01, "Num 0",  "TOP"},
+    { 0x19, 1, 0x02, "Num 1",  "TOP"},
+    { 0x19, 2, 0x03, "Num 2",  "TOP"},
+    { 0x19, 3, 0x04, "Num 3",  "TOP"},
+    { 0x19, 4, 0x05, "Num 4",  "TOP"},
+    { 0x19, 5, 0x06, "Num 5",  "TOP"},
+    { 0x19, 6, 0x07, "Num 6",  "TOP"},
+    { 0x19, 7, 0x08, "Num 7",  "TOP"},
+    { 0x67, 0, 0x09, "Num 8",  "TOP"},
+    { 0x67, 1, 0x0A, "Num 9",  "TOP"},
+    { 0x67, 2, 0x0B, "Num 10", "TOP"},
+    { 0x67, 3, 0x0C, "Num 11", "TOP"},
+    { 0x19, 8, 0x0D, "E1S 0",  "TOP"},
+    { 0x67, 4, 0x0E, "E1S 1",  "TOP"},
+    { 0x18, 0, 0x0F, "PESW",   "TOP"},
+    { 0x66, 0, 0x10, "PESW",   "TOP"},
+
+    // End devices
+    { 0x25, 0, 0x01, "Num 0",  "BOT"},
+    { 0x26, 0, 0x02, "Num 1",  "BOT"},
+    { 0x27, 0, 0x03, "Num 2",  "BOT"},
+    { 0x28, 0, 0x04, "Num 3",  "BOT"},
+    { 0x29, 0, 0x05, "Num 4",  "BOT"},
+    { 0x2A, 0, 0x06, "Num 5",  "BOT"},
+    { 0x2B, 0, 0x07, "Num 6",  "BOT"},
+    { 0x2C, 0, 0x08, "Num 7",  "BOT"},
+    { 0x6F, 0, 0x09, "Num 8",  "BOT"},
+    { 0x70, 0, 0x0A, "Num 9",  "BOT"},
+    { 0x71, 0, 0x0B, "Num 10", "BOT"},
+    { 0x72, 0, 0x0C, "Num 11", "BOT"},
+    { 0x2d, 0, 0x0D, "E1S 0",  "BOT"},
+    { 0x73, 0, 0x0E, "E1S 1",  "BOT"},
+
+    { 0x1A, 0, 0x01, "Num 0",  "TOP"},
+    { 0x1B, 0, 0x02, "Num 1",  "TOP"},
+    { 0x1C, 0, 0x03, "Num 2",  "TOP"},
+    { 0x1D, 0, 0x04, "Num 3",  "TOP"},
+    { 0x1E, 0, 0x05, "Num 4",  "TOP"},
+    { 0x1F, 0, 0x06, "Num 5",  "TOP"},
+    { 0x20, 0, 0x07, "Num 6",  "TOP"},
+    { 0x21, 0, 0x08, "Num 7",  "TOP"},
+    { 0x68, 0, 0x09, "Num 8",  "TOP"},
+    { 0x69, 0, 0x0A, "Num 9",  "TOP"},
+    { 0x6A, 0, 0x0B, "Num 10", "TOP"},
+    { 0x6B, 0, 0x0C, "Num 11", "TOP"},
+    { 0x22, 0, 0x0D, "E1S 0",  "TOP"},
+    { 0x6C, 0, 0x0E, "E1S 1",  "TOP"},
+};
+
+// dual M2 for 2U
+MAPTOSTRING root_port_mapping_2u_dual_m2_gpv3[] = {
+    // bus, device, port, silk screen, location
+    // Down Stream Ports
+    { 0x17, 0, 0x01, "Num 1",  "2OU"},
+    { 0x17, 1, 0x02, "Num 3",  "2OU"},
+    { 0x17, 2, 0x03, "Num 5",  "2OU"},
+    { 0x17, 3, 0x04, "Num 7",  "2OU"},
+    { 0x65, 0, 0x05, "Num 9",  "2OU"},
+    { 0x65, 1, 0x06, "Num 11", "2OU"},
+    { 0x17, 4, 0x07, "E1S 0",  "2OU"},
+    { 0x65, 2, 0x08, "E1S 1",  "2OU"},
+    // End devices
+    { 0x18, 0, 0x01, "Num 1",  "2OU"},
+    { 0x19, 0, 0x02, "Num 3",  "2OU"},
+    { 0x1A, 0, 0x03, "Num 5",  "2OU"},
+    { 0x1B, 0, 0x04, "Num 7",  "2OU"},
+    { 0x66, 0, 0x05, "Num 9",  "2OU"},
+    { 0x67, 0, 0x06, "Num 11", "2OU"},
+    { 0x1C, 0, 0x07, "E1S 0",  "2OU"},
+    { 0x68, 0, 0x08, "E1S 1",  "2OU"},
+};
+
+// single M2 for 2U
+MAPTOSTRING root_port_mapping_2u_sgl_m2_gpv3[] = {
+    // bus, device, port, silk screen, location
+    // Down Stream Ports
+    { 0x17, 0, 0x01, "Num 0",  "2OU"},
+    { 0x17, 1, 0x02, "Num 1",  "2OU"},
+    { 0x17, 2, 0x03, "Num 2",  "2OU"},
+    { 0x17, 3, 0x04, "Num 3",  "2OU"},
+    { 0x17, 4, 0x05, "Num 4",  "2OU"},
+    { 0x17, 5, 0x06, "Num 5",  "2OU"},
+    { 0x17, 6, 0x07, "Num 6",  "2OU"},
+    { 0x17, 7, 0x08, "Num 7",  "2OU"},
+    { 0x65, 0, 0x09, "Num 8",  "2OU"},
+    { 0x65, 1, 0x0A, "Num 9",  "2OU"},
     { 0x65, 2, 0x0B, "Num 10", "2OU"},
     { 0x65, 3, 0x0C, "Num 11", "2OU"},
-    { 0x17, 8, 0x0D, "E1S 0", "2OU"},
-    { 0x65, 4, 0x0E, "E1S 1", "2OU"},
+    { 0x17, 8, 0x0D, "E1S 0",  "2OU"},
+    { 0x65, 4, 0x0E, "E1S 1",  "2OU"},
+
     // End devices
-    { 0x18, 0, 0x01, "Num 0", "2OU"},
-    { 0x19, 0, 0x02, "Num 1", "2OU"},
-    { 0x1a, 0, 0x03, "Num 2", "2OU"},
-    { 0x1b, 0, 0x04, "Num 3", "2OU"},
-    { 0x1c, 0, 0x05, "Num 4", "2OU"},
-    { 0x1d, 0, 0x06, "Num 5", "2OU"},
-    { 0x1e, 0, 0x07, "Num 6", "2OU"},
-    { 0x1f, 0, 0x08, "Num 7", "2OU"},
-    { 0x66, 0, 0x09, "Num 8", "2OU"},
-    { 0x67, 0, 0x0A, "Num 9", "2OU"},
+    { 0x18, 0, 0x01, "Num 0",  "2OU"},
+    { 0x19, 0, 0x02, "Num 1",  "2OU"},
+    { 0x1A, 0, 0x03, "Num 2",  "2OU"},
+    { 0x1B, 0, 0x04, "Num 3",  "2OU"},
+    { 0x1C, 0, 0x05, "Num 4",  "2OU"},
+    { 0x1D, 0, 0x06, "Num 5",  "2OU"},
+    { 0x1E, 0, 0x07, "Num 6",  "2OU"},
+    { 0x1F, 0, 0x08, "Num 7",  "2OU"},
+    { 0x66, 0, 0x09, "Num 8",  "2OU"},
+    { 0x67, 0, 0x0A, "Num 9",  "2OU"},
     { 0x68, 0, 0x0B, "Num 10", "2OU"},
     { 0x69, 0, 0x0C, "Num 11", "2OU"},
-    { 0x20, 0, 0x0D, "E1S 0", "2OU"},
-    { 0x6a, 0, 0x0E, "E1S 1", "2OU"},
+    { 0x20, 0, 0x0D, "E1S 0",  "2OU"},
+    { 0x6A, 0, 0x0E, "E1S 1",  "2OU"},
 };
 
 MAPTOSTRING root_port_mapping_e1s[] = {
@@ -1634,6 +1785,44 @@ static int pal_get_e1s_pcie_config(uint8_t slot_id, uint8_t *pcie_config) {
   return 0;
 }
 
+int
+pal_get_m2_config(uint8_t fru, uint8_t *config)
+{
+  uint8_t tbuf[8] = {0x9c, 0x9c, 0x00, 0x00};
+  uint8_t rbuf[8] = {0};
+  uint8_t tlen = 4;
+  uint8_t rlen = 0;
+  uint8_t intf = 0;
+  int ret = -1;
+
+  switch (fru) {
+    case FRU_CWC:
+      intf = REXP_BIC_INTF;
+      break;
+    case FRU_2U_TOP:
+      intf = RREXP_BIC_INTF1;
+      break;
+    case FRU_2U_BOT:
+      intf = RREXP_BIC_INTF2;
+      break;
+    default:
+      return -1;
+  }
+
+  ret = bic_ipmb_send(FRU_SLOT1, NETFN_OEM_1S_REQ, 0x66, tbuf, tlen, rbuf, &rlen, intf);
+  if (ret == 0 && rlen == 4) {
+    if (rbuf[3] == 0x08) {
+      *config = CONFIG_C_CWC_SINGLE;
+    } else if (rbuf[3] == 0x04) {
+      *config = CONFIG_C_CWC_DUAL;
+    } else {
+      return -1;
+    }
+  }
+
+  return ret;
+}
+
 int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
   uint8_t pcie_conf = 0xff;
   uint8_t *data = res_data;
@@ -1686,7 +1875,10 @@ int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, u
     if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
       pcie_conf = CONFIG_C_GPV3;
     } else if ( type_2ou == CWC_MCHP_BOARD ) {
-      pcie_conf = CONFIG_C_CWC_SINGLE;
+      if (pal_get_m2_config(FRU_2U_TOP, &pcie_conf) != 0) {
+        pcie_conf = CONFIG_C_CWC_SINGLE;
+        syslog(LOG_WARNING, "%s() fail to get pcie_conf, set default value = %02X\n", __func__, pcie_conf);
+      }
     } else {
       pcie_conf = CONFIG_C;
     }
@@ -1933,12 +2125,34 @@ pal_parse_vr_event(uint8_t fru, uint8_t *event_data, char *error_log) {
   return PAL_EOK;
 }
 
+static uint8_t
+pal_get_gpv3_cfg() {
+  char value[MAX_VALUE_LEN] = {0};
+  int ret = PAL_ENOTSUP;
+  static uint8_t cfg = 0;
+
+  if ( cfg == 0 ) {
+    ret = kv_get("gpv3_cfg", value, NULL, 0);
+    if ( ret < 0 ) {
+      syslog(LOG_WARNING, "Failed to get gpv3_cfg\n");
+    } else cfg = atoi(value);
+  }
+
+  // return 0 by default
+  return cfg;
+}
+
 static void
 pal_sel_root_port_mapping_tbl(uint8_t fru, uint8_t *bmc_location, MAPTOSTRING **tbl, uint8_t *cnt) {
+  enum {
+    GPV3_84CH_DUAL  = 0x4,
+    GPV3_100CH_DUAL = 0x6,
+  };
   uint8_t board_1u = M2_BOARD;
   uint8_t board_2u = M2_BOARD;
   uint8_t config_status = CONFIG_UNKNOWN;
   int ret = 0;
+  size_t tbl_size = 0;
 
   do {
     ret = fby3_common_get_bmc_location(bmc_location);
@@ -1971,6 +2185,12 @@ pal_sel_root_port_mapping_tbl(uint8_t fru, uint8_t *bmc_location, MAPTOSTRING **
         syslog(LOG_ERR, "%s() Cannot get 2ou_board_type\n", __func__);
         break;
       }
+
+      // get the GPv3 config and provide the corresponding table
+      if ( board_2u == GPV3_MCHP_BOARD || board_2u == CWC_MCHP_BOARD ) {
+        // re-use it
+        config_status = pal_get_gpv3_cfg();
+      }
     }
   } while(0);
 
@@ -1983,15 +2203,31 @@ pal_sel_root_port_mapping_tbl(uint8_t fru, uint8_t *bmc_location, MAPTOSTRING **
   if ( board_1u == EDSFF_1U || board_2u == E1S_BOARD ) {
     // case 1/2OU E1S
     *tbl = root_port_mapping_e1s;
-    *cnt = sizeof(root_port_mapping_e1s)/sizeof(MAPTOSTRING);
+    tbl_size = sizeof(root_port_mapping_e1s);
   } else if ( (board_2u == GPV3_MCHP_BOARD || board_2u == GPV3_BRCM_BOARD)) {
     // case Config C and Config D GPv3
-    *tbl = root_port_mapping_gpv3;
-    *cnt = sizeof(root_port_mapping_gpv3)/sizeof(MAPTOSTRING);
+    if ( config_status == GPV3_84CH_DUAL || config_status == GPV3_100CH_DUAL ) {
+      *tbl = root_port_mapping_2u_dual_m2_gpv3;
+      tbl_size = sizeof(root_port_mapping_2u_dual_m2_gpv3);
+    } else { // single by default
+      *tbl = root_port_mapping_2u_sgl_m2_gpv3;
+      tbl_size = sizeof(root_port_mapping_2u_sgl_m2_gpv3);
+    }
+  } else if ( board_2u == CWC_MCHP_BOARD ) {
+    if ( config_status == GPV3_84CH_DUAL ||config_status == GPV3_100CH_DUAL ) {
+      *tbl = root_port_mapping_4u_dual_m2_gpv3;
+      tbl_size = sizeof(root_port_mapping_4u_dual_m2_gpv3);
+    } else { // single by default
+      *tbl = root_port_mapping_4u_sgl_m2_gpv3;
+      tbl_size = sizeof(root_port_mapping_4u_sgl_m2_gpv3);
+    }
   } else {
     *tbl = root_port_mapping;
-    *cnt = sizeof(root_port_mapping)/sizeof(MAPTOSTRING);
+    tbl_size = sizeof(root_port_mapping);
   }
+
+  *cnt = tbl_size / sizeof(MAPTOSTRING);
+
   return;
 }
 
@@ -2100,7 +2336,7 @@ pal_get_m2vpp_str_name(uint8_t fru, uint8_t comp, uint8_t root_port, char *error
 
 static const char*
 pal_get_board_name(uint8_t comp) {
-  const char *comp_str[5] = {"ServerBoard", "1OU", "2OU", "SPE", "GPv3"};
+  const char *comp_str[8] = {"ServerBoard", "1OU", "2OU", "SPE", "GPv3", "CWC", "TOP GPv3", "BOT GPv3"};
   const uint8_t comp_size = ARRAY_SIZE(comp_str);
   if ( comp < comp_size ) {
     return comp_str[comp];
@@ -2109,9 +2345,24 @@ pal_get_board_name(uint8_t comp) {
   return "Undefined board";
 }
 
+static const char*
+pal_get_cwc_dev_str(uint8_t dev) {
+  const char *dev_str[5] = {"P5V", "P3V3_STBY", "P3V3", "P1V8", "P0V84"};
+  const uint8_t dev_size = ARRAY_SIZE(dev_str);
+  if ( dev < dev_size ) {
+    return dev_str[dev];
+  }
+
+  return "Undefined device";
+}
+
 static void
-pal_get_m2_str_name(uint8_t comp, uint8_t device_num, char *error_log) {
-  snprintf(error_log, 256, "%s/Num %d ", pal_get_board_name(comp), device_num);
+pal_get_m2_str_name(uint8_t event, uint8_t comp, uint8_t device_num, char *error_log) {
+  if ((event == 0x0c || event == 0x15) && comp == 5) {
+    snprintf(error_log, 256, "%s/%s ", pal_get_board_name(comp), pal_get_cwc_dev_str(device_num));
+  } else {
+    snprintf(error_log, 256, "%s/Num %d ", pal_get_board_name(comp), device_num);
+  }
   return;
 }
 
@@ -2120,6 +2371,14 @@ pal_get_2ou_vr_str_name(uint8_t comp, uint8_t vr_num, char *error_log) {
   const char *vr_list_str[5] = {"P3V3_STBY1", "P3V3_STBY2", "P3V3_STBY3", "P1V8", "PESW VR"};
   const uint8_t vr_list_size = ARRAY_SIZE(vr_list_str);
   snprintf(error_log, 256, "%s/%s ", pal_get_board_name(comp), (vr_num < vr_list_size)?vr_list_str[vr_num]:"Undefined VR");
+  return;
+}
+
+static void
+pal_get_gpv3_not_present_str_name(uint8_t comp, uint8_t gpv3_name, char *error_log) {
+  const char *gpv3_present_list_str[5] = {"TOP_GPv3_PRESENT1", "TOP_GPv3_PRESENT2", "BOT_GPv3_PRESENT1", "BOT_GPv3_PRESENT2"};
+  const uint8_t gpv3_present_list_size = ARRAY_SIZE(gpv3_present_list_str);
+  snprintf(error_log, 256, "%s/%s ", pal_get_board_name(comp), (gpv3_name < gpv3_present_list_size)?gpv3_present_list_str[gpv3_name]:"Undefined GPv3");
   return;
 }
 
@@ -2146,6 +2405,8 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
     SYS_SLOT_PRSNT     = 0x11,
     SYS_PESW_ERR       = 0x12,
     SYS_2OU_VR_FAULT   = 0x13,
+    SYS_GPV3_NOT_PRESENT  = 0x14,
+    SYS_PWRGOOD_TIMEOUT   = 0x15,
     SYS_DP_X8_PWR_FAULT   = 0x16,
     SYS_DP_X16_PWR_FAULT  = 0x17,
     E1S_1OU_M2_PRESENT    = 0x80,
@@ -2192,7 +2453,7 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
       strcat(error_log, "VPP Power Control");
       break;
     case SYS_M2_PGOOD:
-      pal_get_m2_str_name(event_data[1], event_data[2], error_log);
+      pal_get_m2_str_name(event, event_data[1], event_data[2], error_log);
       strcat(error_log, "Power Good Fault");
       break;
     case SYS_VCCIO_FAULT:
@@ -2205,8 +2466,8 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
       strcat(error_log, "VCCIO Over Voltage Fault");
       break;
     case SYS_M2_OCP_DETECT:
-      pal_get_m2_str_name(event_data[1], event_data[2], error_log);
-      strcat(error_log, "Load Switch OCP");
+      pal_get_m2_str_name(event, event_data[1], event_data[2], error_log);
+      strcat(error_log, "INA233 Alert");
       break;
     case SYS_SLOT_PRSNT:
       snprintf(prsnt_str, sizeof(prsnt_str), "Slot%d present", event_data[1]);
@@ -2218,6 +2479,14 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
     case SYS_2OU_VR_FAULT:
       pal_get_2ou_vr_str_name(event_data[1], event_data[2], error_log);
       strcat(error_log, "2OU VR fault");
+      break;
+    case SYS_GPV3_NOT_PRESENT:
+      pal_get_gpv3_not_present_str_name(event_data[1], event_data[2], error_log);
+      strcat(error_log, "GPv3 Board Not Present Warning");
+      break;
+    case SYS_PWRGOOD_TIMEOUT:
+      pal_get_m2_str_name(event, event_data[1], event_data[2], error_log);
+      strcat(error_log, "Power Good Time Out");
       break;
     case SYS_DP_X8_PWR_FAULT:
       fby3_common_get_2ou_board_type(fru, &type_2ou);
@@ -2759,9 +3028,10 @@ pal_post_display(uint8_t uart_select, uint8_t postcode) {
     tbuf[1] = postcode;
     tlen = 2;
     rlen = 0;
-    while (ret < 0 && retry-- > 0) {
+    do {
       ret = i2c_rdwr_msg_transfer(fd, CPLD_ADDRESS, tbuf, tlen, rbuf, rlen);
-    }
+    } while (ret < 0 && retry-- > 0);
+
     if (fd > 0) {
       close(fd);
     }
@@ -4592,4 +4862,29 @@ int pal_is_cwc(void) {
 
 int pal_get_cwc_id(char *str, uint8_t *fru) {
   return fby3_common_get_exp_id(str, fru) == 0 ? PAL_EOK : PAL_ENOTSUP;
+}
+
+int pal_get_asd_sw_status(uint8_t fru) {
+  int intf = 0, slot = 0;
+  bic_gpio_t gpio = {0};
+
+  switch (fru) {
+    case FRU_2U_TOP:
+      intf = RREXP_BIC_INTF1;
+      slot = FRU_SLOT1;
+      break;
+    case FRU_2U_BOT:
+      intf = RREXP_BIC_INTF2;
+      slot = FRU_SLOT1;
+      break;
+    default:
+      return 0;
+  }
+
+  if (bic_get_gpio(slot, &gpio, intf) == 0) {
+    if (gpio.gpio[3] & 0x01) {
+      return 1;
+    }
+  }
+  return 0;
 }

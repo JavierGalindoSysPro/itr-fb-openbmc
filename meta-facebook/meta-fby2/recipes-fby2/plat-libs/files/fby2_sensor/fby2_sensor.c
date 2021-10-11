@@ -243,6 +243,10 @@ const uint8_t bic_gpv2_sdr_alter_sensor_list[] = {
 };
 #endif
 
+const uint8_t nd_bic_sdr_accuracy_sensor_support_list[] = {
+  BIC_ND_SENSOR_INA230_POWER,
+};
+
 const uint8_t bic_sdr_accuracy_sensor_support_list[] = {
   BIC_SENSOR_VCCIN_VR_POUT,
   BIC_SENSOR_INA230_POWER,
@@ -1141,13 +1145,56 @@ read_temp_attr(const char *device, const char *attr, float *value) {
 }
 
 #if defined(CONFIG_FBY2_ND)
+enum SENSOR_TYPE_ID {
+  SNR_TYPE_TMP421 = 0,
+  SNR_TYPE_TMP75  = 1,
+  // keep this as last one
+  SNR_TYPE_UNKNOW = 255
+};
+
+static uint8_t get_temp_sensor_type(char *key) {
+  char value[MAX_VALUE_LEN] = {0};
+
+  if (kv_get(key, value, NULL, 0) < 0) {
+    return SNR_TYPE_UNKNOW;
+  }
+
+  if (strcmp(value, "tmp421") == 0) {
+    return SNR_TYPE_TMP421;
+  } else if (strcmp(value, "tmp75") == 0) {
+    return SNR_TYPE_TMP75;
+  }
+
+  return SNR_TYPE_UNKNOW;
+}
+
 static int
 read_temp_lmsensors(uint8_t id, float *value) {
+  static bool is_init = false;
+  static uint8_t inlet_type;
+  static uint8_t outlet_type;
   int ret = -1;
+
+  if (!is_init) {
+    inlet_type = get_temp_sensor_type("inlet_temp_type");
+    outlet_type = get_temp_sensor_type("outlet_temp_type");
+    syslog(LOG_INFO, "inlet_temp_type: %u", inlet_type);
+    syslog(LOG_INFO, "outlet_temp_type: %u", outlet_type);
+    is_init = true;
+  }
+
   if (id == SP_SENSOR_INLET_TEMP) {
-    ret = sensors_read("tmp421-i2c-9-4e", "INLET_TEMP", value);
+    if (inlet_type == SNR_TYPE_TMP75) {
+      ret = sensors_read("tmp75-i2c-9-48", "INLET_TEMP", value);
+    } else {
+      ret = sensors_read("tmp421-i2c-9-4e", "INLET_TEMP", value);
+    }
   } else if (id == SP_SENSOR_OUTLET_TEMP) {
-    ret = sensors_read("tmp421-i2c-9-4f", "OUTLET_TEMP", value);
+    if (outlet_type == SNR_TYPE_TMP75) {
+      ret = sensors_read("tmp75-i2c-9-49", "OUTLET_TEMP", value);
+    } else {
+      ret = sensors_read("tmp421-i2c-9-4f", "OUTLET_TEMP", value);
+    }
   }
 
   return ret;
@@ -1569,6 +1616,8 @@ bic_read_sensor_wrapper(uint8_t fru, uint8_t sensor_num, bool discrete,
   bool is_accuracy_sensor = false;
   uint8_t server_type = 0xFF;
   int slot_type = 3;
+  const uint8_t *accuracy_sensor_list;
+  size_t accuracy_sensor_list_sz;
 
   slot_type = fby2_get_slot_type(fru);
 
@@ -1580,15 +1629,21 @@ bic_read_sensor_wrapper(uint8_t fru, uint8_t sensor_num, bool discrete,
 
     switch(server_type){
       case SERVER_TYPE_ND:
+        accuracy_sensor_list = nd_bic_sdr_accuracy_sensor_support_list;
+        accuracy_sensor_list_sz = sizeof(nd_bic_sdr_accuracy_sensor_support_list)/sizeof(uint8_t);
         break;
       case SERVER_TYPE_TL:
-        for (i=0; i < sizeof(bic_sdr_accuracy_sensor_support_list)/sizeof(uint8_t); i++) {
-          if (bic_sdr_accuracy_sensor_support_list[i] == sensor_num)
-            is_accuracy_sensor = true;
-        }
+        accuracy_sensor_list = bic_sdr_accuracy_sensor_support_list;
+        accuracy_sensor_list_sz = sizeof(bic_sdr_accuracy_sensor_support_list)/sizeof(uint8_t);
         break;
       default:
         return -1;
+    }
+
+    for (i=0; i < accuracy_sensor_list_sz; i++) {
+      if (accuracy_sensor_list[i] == sensor_num) {
+        is_accuracy_sensor = true;
+      }
     }
 
     // accuracy sensor VCCIN_VR_POUT, INA230_POWER and SOC_PACKAGE_PWR

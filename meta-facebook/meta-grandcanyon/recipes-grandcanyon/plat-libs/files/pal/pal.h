@@ -104,6 +104,7 @@ extern "C" {
 #define ERR_CODE_BMC_REMOTE_HB_HEALTH    0xFC
 #define ERR_CODE_SCC_LOCAL_HB_HEALTH     0xFD
 #define ERR_CODE_SCC_REMOTE_HB_HEALTH    0xFE
+#define ERR_CODE_BIC_HB_HEALTH           0xFF
 
 // Host Interface Control Register
 #define LPC_CTR_BASE        0x1E789000
@@ -154,6 +155,9 @@ extern "C" {
 #define BIOS_POST_CMPLT   67
 
 #define ERROR_ID_LOG_LEN  16
+
+#define HEARTBEAT_NORMAL                  1
+#define HEARTBEAT_ABNORMAL                0
 
 typedef enum {
   STATUS_LED_OFF,
@@ -358,13 +362,13 @@ enum {
 };
 
 enum {
-  DEBUG_UART_SEL_BMC = 0,
-  DEBUG_UART_SEL_HOST,
-  DEBUG_UART_SEL_BIC,
-  DEBUG_UART_SEL_EXP_SMART,
-  DEBUG_UART_SEL_EXP_SDB,
-  DEBUG_UART_SEL_IOC_T5_SMART,
-  DEBUG_UART_SEL_IOC_T7_SMART,
+  DEBUG_UART_SEL_BMC          = 0xE0,
+  DEBUG_UART_SEL_HOST         = 0xE1,
+  DEBUG_UART_SEL_BIC          = 0xE2,
+  DEBUG_UART_SEL_EXP_SMART    = 0xE3,
+  DEBUG_UART_SEL_EXP_SDB      = 0xE4,
+  DEBUG_UART_SEL_IOC_T5_SMART = 0xE5,
+  DEBUG_UART_SEL_IOC_T7_SMART = 0xE6,
 };
 
 enum {
@@ -394,10 +398,10 @@ enum {
 };
 
 enum {
-  HEARTBEAT_BIC         = 0,
-  HEARTBEAT_REMOTE_BMC  = 2,
-  HEARTBEAT_LOCAL_SCC   = 3,
-  HEARTBEAT_REMOTE_SCC  = 4,
+  HEARTBEAT_BIC         = 1,
+  HEARTBEAT_REMOTE_BMC  = 3,
+  HEARTBEAT_LOCAL_SCC   = 4,
+  HEARTBEAT_REMOTE_SCC  = 5,
 };
 
 enum IOC_WWID_COMPONENT {
@@ -458,7 +462,7 @@ int pal_get_drive_status(const char* i2c_bus_dev);
 int pal_is_crashdump_ongoing(uint8_t fru);
 int pal_sel_handler(uint8_t fru, uint8_t snr_num, uint8_t *event_data);
 int pal_get_tach_cnt();
-int pal_get_heartbeat(float *hb_val, uint8_t component);
+bool pal_is_heartbeat_ok(uint8_t component);
 int pal_handle_oem_1s_intr(uint8_t fru, uint8_t *data);
 int pal_handle_oem_1s_asd_msg_in(uint8_t fru, uint8_t *data, uint8_t data_len);
 int pal_set_nic_perst(uint8_t val);

@@ -58,4 +58,6 @@ IMAGE_INSTALL += " \
   asd-test \
   bic-util \
   iocd \
+  otp \
+  mctp-util \
   "

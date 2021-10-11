@@ -12,9 +12,8 @@ declare -a PLAT_DISTRO_OVERRIDES
 # Add overrides here on a per-platform basis.
 PLAT_DISTRO_OVERRIDES=(
 # master / rolling-release platforms
-#   -- none --
+  meta-bletchley:lf-master
 # hardknott platforms (latest)
-# gatesgarth platforms (pending upgrade)
 #   -- none --
 # dunfell platforms (pending upgrade)
   meta-clearcreek:lf-dunfell
@@ -26,13 +25,13 @@ PLAT_DISTRO_OVERRIDES=(
   meta-fby2-nd:lf-dunfell
   meta-fby3:lf-dunfell
   meta-fuji:lf-dunfell
+  meta-grandcanyon:lf-dunfell
   meta-minipack:lf-dunfell
   meta-qemux86:lf-dunfell
   meta-wedge400:lf-dunfell
 # zeus platforms (pending upgrade)
   meta-elbert:zeus
   meta-fby35:zeus
-  meta-grandcanyon:zeus
 # Legacy platforms pending kernel upgrade
   meta-fby2-gpv2:rocko
   meta-fby2:rocko
@@ -133,10 +132,26 @@ REPO_ROOT="$(pwd)"
 if [ -d "yocto/${_distro}/workaround-bin/" ]; then
     PATH="$(realpath "yocto/${_distro}/workaround-bin"):$PATH"
 fi
+if [ -d "facebook/workaround-bin" ]; then
+  PATH="$(realpath facebook/workaround-bin):$PATH"
+fi
+
+# Old distros required going into the poky directory to find the poky metas,
+# but lf-based distros have them in the yocto root.  Some of the meta-phosphor
+# recipes get confused if COREROOT is one level deeper.
+case ${_distro} in
+    lf-*)
+        _poky=""
+        ;;
+
+    *)
+        _poky="/poky"
+        ;;
+esac
 
 # shellcheck disable=SC1090
 # distro can vary, so we can't use a shellcheck directive to point to next
-. "yocto/${_distro}/poky/oe-init-build-env" "$@"
+. "yocto/${_distro}${_poky}/oe-init-build-env" "$@"
 
 if [ -d "${REPO_ROOT}/facebook" ]; then
   "${REPO_ROOT}/facebook/facebookify.sh" "$(pwd)"

@@ -53,6 +53,26 @@
 
 static uint8_t psu_bus[] = { 24, 25, 26, 27 };
 
+static float cfm_lookup_8pim16q_0pim8ddm_2psu[] = {
+  89.15, 112.14, 147.91, 176.69, 212.77, 250.76,
+  285.81, 315.18, 347.17, 378.02, 381.12
+};
+
+static float cfm_lookup_5pim16q_3pim8ddm_2psu[] = {
+  95.41, 122.05, 151.8, 186.63, 223.53, 259.95,
+  297.9, 329.78, 362.11, 390.28, 394.78
+};
+
+static float cfm_lookup_2pim16q_6pim8ddm_4psu[] = {
+  92.33, 117.19, 147.91, 176.69, 220.89, 259.96,
+  301.83, 338.58, 373.32, 410.86, 412.29
+};
+
+static float cfm_lookup_0pim16q_8pim8ddm_4psu[] = {
+  95.41, 122.05, 151.8, 179.97, 226.14, 262.21,
+  303.77, 342.04, 378.02, 417.96, 417.96
+};
+
 typedef struct {
   char name[32];
 } sensor_desc_t;
@@ -110,27 +130,20 @@ const uint8_t smb_sensor_list[] = {
   SMB_POS_2V5B_E,
   SMB_POS_3V3B_E,
   TH4_VRD1_VIN,
-  TH4_VRD1_VMON,
   TH4_VRD1_VOUT_LOOP0,
-  TH4_VRD1_TEMP1,
-  TH4_VRD1_TEMP2,
-  TH4_VRD1_TEMP3,
+  TH4_VRD1_TEMP_LOOP0,
   TH4_VRD1_PIN,
   TH4_VRD1_POUT_LOOP0,
   TH4_VRD1_IIN,
   TH4_VRD1_IOUT_LOOP0,
   TH4_VRD2_VIN,
-  TH4_VRD2_VMON,
   TH4_VRD2_VOUT_LOOP0,
   TH4_VRD2_VOUT_LOOP1,
   TH4_VRD2_VOUT_LOOP2,
-  TH4_VRD2_TEMP1,
-  TH4_VRD2_TEMP2,
-  TH4_VRD2_TEMP3,
-  TH4_VRD2_TEMP4,
-  TH4_VRD2_TEMP5,
-  TH4_VRD2_TEMP6,
-  TH4_VRD2_TEMP7,
+  TH4_VRD2_TEMP_LOOP0,
+  TH4_VRD2_TEMP_LOOP1,
+  TH4_VRD2_TEMP_LOOP2,
+  TH4_VRD2_TEMP_INTERNAL,
   TH4_VRD2_PIN_LOOP0,
   TH4_VRD2_PIN_LOOP1,
   TH4_VRD2_PIN_LOOP2,
@@ -314,17 +327,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -361,17 +370,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -408,17 +413,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -455,17 +456,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -502,17 +499,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -549,17 +542,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -596,17 +585,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -643,17 +628,13 @@ const uint8_t pim8ddm_sensor_list[MAX_PIM][PIM8DDM_SENSOR_COUNT] = {
     PIM_POS_1V5,
     PIM_POS_1V8,
     PIM_ISL_VIN,
-    PIM_ISL_VMON,
     PIM_ISL_VOUT_LOOP0,
     PIM_ISL_VOUT_LOOP1,
     PIM_ISL_VOUT_LOOP2,
-    PIM_ISL_TEMP1,
-    PIM_ISL_TEMP2,
-    PIM_ISL_TEMP3,
-    PIM_ISL_TEMP4,
-    PIM_ISL_TEMP5,
-    PIM_ISL_TEMP6,
-    PIM_ISL_TEMP7,
+    PIM_ISL_TEMP_LOOP0,
+    PIM_ISL_TEMP_LOOP1,
+    PIM_ISL_TEMP_LOOP2,
+    PIM_ISL_TEMP_INTERNAL,
     PIM_ISL_PIN_LOOP0,
     PIM_ISL_PIN_LOOP1,
     PIM_ISL_PIN_LOOP2,
@@ -736,6 +717,7 @@ const uint8_t fan_sensor_list[] = {
   FAN5_RPM,
   FAN_CARD_BOARD_TEMP,
   FAN_CARD_OUTLET_TEMP,
+  SYSTEM_AIRFLOW,
 };
 
 float scm_sensor_threshold[MAX_SENSOR_NUM + 1][MAX_SENSOR_THRESHOLD + 1] = {0};
@@ -757,8 +739,6 @@ pim_thresh_array_init(uint8_t fru) {
   int i = 0;
   int type;
 
-  syslog(LOG_WARNING,
-         "pim_thresh_array_init: PIM %d init threshold array", fru - FRU_PIM2 + 2);
   switch (fru) {
     case FRU_PIM2:
     case FRU_PIM3:
@@ -828,187 +808,171 @@ pim_thresh_array_init(uint8_t fru) {
         pim_sensor_threshold[i][PIM_DPM_TEMP][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_DPM_TEMP][LNC_THRESH] = 0; // unset
       } else if (type == PIM_TYPE_8DDM) {
-        pim_sensor_threshold[i][PIM_POS_3V3_U_VOUT][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_U_VOUT][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_U_VOUT][UCR_THRESH] = 3.63;
+        pim_sensor_threshold[i][PIM_POS_3V3_U_VOUT][LCR_THRESH] = 2.98;
         pim_sensor_threshold[i][PIM_POS_3V3_U_VOUT][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_U_VOUT][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_U_TEMP][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_U_TEMP][UCR_THRESH] = 150;
         pim_sensor_threshold[i][PIM_POS_3V3_U_TEMP][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_U_TEMP][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_U_TEMP][LNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_U_CURR][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_U_CURR][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_U_CURR][LCR_THRESH] = -32;
         pim_sensor_threshold[i][PIM_POS_3V3_U_CURR][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_U_CURR][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_L_VOUT][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_L_VOUT][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_L_VOUT][UCR_THRESH] = 3.63;
+        pim_sensor_threshold[i][PIM_POS_3V3_L_VOUT][LCR_THRESH] = 2.98;
         pim_sensor_threshold[i][PIM_POS_3V3_L_VOUT][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_L_VOUT][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_L_TEMP][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_L_TEMP][UCR_THRESH] = 150;
         pim_sensor_threshold[i][PIM_POS_3V3_L_TEMP][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_L_TEMP][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_L_TEMP][LNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_L_CURR][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_L_CURR][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_L_CURR][LCR_THRESH] = -32;
         pim_sensor_threshold[i][PIM_POS_3V3_L_CURR][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_L_CURR][LNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_LM73_TEMP][UNC_THRESH] = 90;
         pim_sensor_threshold[i][PIM_LM73_TEMP][UCR_THRESH] = 100;
         pim_sensor_threshold[i][PIM_LM73_TEMP][LNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_LM73_TEMP][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_12V][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_12V][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_12V][UCR_THRESH] = 13.8;
+        pim_sensor_threshold[i][PIM_POS_12V][LCR_THRESH] = 9.6;
         pim_sensor_threshold[i][PIM_POS_12V][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_12V][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_E][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_E][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_E][UCR_THRESH] = 3.63;
+        pim_sensor_threshold[i][PIM_POS_3V3_E][LCR_THRESH] = 2.97;
         pim_sensor_threshold[i][PIM_POS_3V3_E][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_E][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_1V2_E][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_1V2_E][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_1V2_E][UCR_THRESH] = 1.32;
+        pim_sensor_threshold[i][PIM_POS_1V2_E][LCR_THRESH] = 1.08;
         pim_sensor_threshold[i][PIM_POS_1V2_E][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_1V2_E][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_U][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_U][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_U][UCR_THRESH] = 3.63;
+        pim_sensor_threshold[i][PIM_POS_3V3_U][LCR_THRESH] = 2.97;
         pim_sensor_threshold[i][PIM_POS_3V3_U][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_U][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_L][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_3V3_L][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_3V3_L][UCR_THRESH] = 3.63;
+        pim_sensor_threshold[i][PIM_POS_3V3_L][LCR_THRESH] = 2.97;
         pim_sensor_threshold[i][PIM_POS_3V3_L][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_3V3_L][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_DPM_TEMP][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_DPM_TEMP][UCR_THRESH] = 125;
         pim_sensor_threshold[i][PIM_DPM_TEMP][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_DPM_TEMP][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_DPM_TEMP][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_5V0][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_5V0][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_5V0][UCR_THRESH] = 5.75;
+        pim_sensor_threshold[i][PIM_POS_5V0][LCR_THRESH] = 4.25;
         pim_sensor_threshold[i][PIM_POS_5V0][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_5V0][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_0V9][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_0V9][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_0V9][UCR_THRESH] = 0.99;
+        pim_sensor_threshold[i][PIM_POS_0V9][LCR_THRESH] = 0.81;
         pim_sensor_threshold[i][PIM_POS_0V9][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_0V9][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_1V5][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_1V5][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_1V5][UCR_THRESH] = 1.7;
+        pim_sensor_threshold[i][PIM_POS_1V5][LCR_THRESH] = 1.39;
         pim_sensor_threshold[i][PIM_POS_1V5][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_1V5][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_1V8][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_POS_1V8][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_POS_1V8][UCR_THRESH] = 2.03;
+        pim_sensor_threshold[i][PIM_POS_1V8][LCR_THRESH] = 1.66;
         pim_sensor_threshold[i][PIM_POS_1V8][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_POS_1V8][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VIN][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_VIN][UCR_THRESH] = 16;
         pim_sensor_threshold[i][PIM_ISL_VIN][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_VIN][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_VIN][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VMON][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VMON][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VMON][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VMON][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP0][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP0][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP0][UCR_THRESH] = 0.99;
+        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP0][LCR_THRESH] = 0.81;
         pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP0][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP0][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP1][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP1][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP1][UCR_THRESH] = 1.7;
+        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP1][LCR_THRESH] = 1.39;
         pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP1][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP1][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP2][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP2][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP2][UCR_THRESH] = 2.03;
+        pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP2][LCR_THRESH] = 1.66;
         pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP2][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_VOUT_LOOP2][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP1][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP1][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP1][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP1][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP2][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP2][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP2][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP2][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP3][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP3][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP3][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP3][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP4][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP4][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP4][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP4][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP5][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP5][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP5][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP5][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP6][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP6][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP6][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP6][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP7][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP7][LCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP7][UNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_TEMP7][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_PIN_LOOP0][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP0][UCR_THRESH] = 125;
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP0][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP0][UNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP0][LNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP1][UCR_THRESH] = 125;
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP1][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP1][UNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP1][LNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP2][UCR_THRESH] = 125;
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP2][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP2][UNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_LOOP2][LNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_INTERNAL][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_INTERNAL][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_INTERNAL][UNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_TEMP_INTERNAL][LNC_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_PIN_LOOP0][UCR_THRESH] = 116;
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP0][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP0][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP0][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_PIN_LOOP1][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_PIN_LOOP1][UCR_THRESH] = 51;
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP1][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP1][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP1][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_PIN_LOOP2][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_PIN_LOOP2][UCR_THRESH] = 26;
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP2][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP2][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_PIN_LOOP2][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_POUT_LOOP0][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_POUT_LOOP0][UCR_THRESH] = 105;
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP0][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP0][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP0][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_POUT_LOOP1][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_POUT_LOOP1][UCR_THRESH] = 44;
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP1][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP1][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP1][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_POUT_LOOP2][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_POUT_LOOP2][UCR_THRESH] = 22;
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP2][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP2][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_POUT_LOOP2][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_IIN_LOOP0][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_IIN_LOOP0][UCR_THRESH] = 50;
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP0][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP0][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP0][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_IIN_LOOP1][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_IIN_LOOP1][UCR_THRESH] = 50;
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP1][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP1][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP1][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_IIN_LOOP2][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_IIN_LOOP2][UCR_THRESH] = 50;
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP2][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP2][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IIN_LOOP2][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP0][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP0][UCR_THRESH] = 116;
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP0][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP0][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP0][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP1][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP1][UCR_THRESH] = 28;
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP1][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP1][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP1][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP2][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP2][UCR_THRESH] = 12;
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP2][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP2][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ISL_IOUT_LOOP2][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_VIN][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_VIN][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ECB_VIN][UCR_THRESH] = 14.5;
+        pim_sensor_threshold[i][PIM_ECB_VIN][LCR_THRESH] = 4.8;
         pim_sensor_threshold[i][PIM_ECB_VIN][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_VIN][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_VOUT][UCR_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_VOUT][LCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ECB_VOUT][UCR_THRESH] = 13.8;
+        pim_sensor_threshold[i][PIM_ECB_VOUT][LCR_THRESH] = 9.6;
         pim_sensor_threshold[i][PIM_ECB_VOUT][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_VOUT][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_TEMP][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ECB_TEMP][UCR_THRESH] = 125;
         pim_sensor_threshold[i][PIM_ECB_TEMP][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_TEMP][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_TEMP][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_POWER][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ECB_POWER][UCR_THRESH] = 540;
         pim_sensor_threshold[i][PIM_ECB_POWER][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_POWER][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_POWER][LNC_THRESH] = 0; // unset
-        pim_sensor_threshold[i][PIM_ECB_CURR][UCR_THRESH] = 0; // unset
+        pim_sensor_threshold[i][PIM_ECB_CURR][UCR_THRESH] = 45;
         pim_sensor_threshold[i][PIM_ECB_CURR][LCR_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_CURR][UNC_THRESH] = 0; // unset
         pim_sensor_threshold[i][PIM_ECB_CURR][LNC_THRESH] = 0; // unset
@@ -1367,20 +1331,11 @@ smb_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
       case TH4_VRD1_VIN:
         ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, VOLT(1), value);
         break;
-      case TH4_VRD1_VMON:
-        ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, VOLT(2), value);
-        break;
       case TH4_VRD1_VOUT_LOOP0:
         ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, VOLT(3), value);
         break;
-      case TH4_VRD1_TEMP1:
+      case TH4_VRD1_TEMP_LOOP0:
         ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, TEMP(1), value);
-        break;
-      case TH4_VRD1_TEMP2:
-        ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, TEMP(2), value);
-        break;
-      case TH4_VRD1_TEMP3:
-        ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, TEMP(3), value);
         break;
       case TH4_VRD1_PIN:
         ret = read_attr(fru, sensor_num, SMB_RAA228228_DEVICE, POWER(1), value);
@@ -1399,9 +1354,6 @@ smb_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
       case TH4_VRD2_VIN:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, VOLT(1), value);
         break;
-      case TH4_VRD2_VMON:
-        ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, VOLT(2), value);
-        break;
       case TH4_VRD2_VOUT_LOOP0:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, VOLT(3), value);
         break;
@@ -1411,26 +1363,17 @@ smb_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
       case TH4_VRD2_VOUT_LOOP2:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, VOLT(5), value);
         break;
-      case TH4_VRD2_TEMP1:
+      case TH4_VRD2_TEMP_LOOP0:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(1), value);
         break;
-      case TH4_VRD2_TEMP2:
+      case TH4_VRD2_TEMP_LOOP1:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(2), value);
         break;
-      case TH4_VRD2_TEMP3:
+      case TH4_VRD2_TEMP_LOOP2:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(3), value);
         break;
-      case TH4_VRD2_TEMP4:
+      case TH4_VRD2_TEMP_INTERNAL:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(4), value);
-        break;
-      case TH4_VRD2_TEMP5:
-        ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(5), value);
-        break;
-      case TH4_VRD2_TEMP6:
-        ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(6), value);
-        break;
-      case TH4_VRD2_TEMP7:
-        ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, TEMP(7), value);
         break;
       case TH4_VRD2_PIN_LOOP0:
         ret = read_attr(fru, sensor_num, SMB_ISL68226_DEVICE, POWER(1), value);
@@ -1656,10 +1599,6 @@ pim_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, VOLT(1), value);
       break;
-    case PIM_ISL_VMON:
-      dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
-      ret = read_attr(fru, sensor_num, full_name, VOLT(2), value);
-      break;
     case PIM_ISL_VOUT_LOOP0:
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, VOLT(3), value);
@@ -1672,33 +1611,21 @@ pim_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, VOLT(5), value);
       break;
-    case PIM_ISL_TEMP1:
+    case PIM_ISL_TEMP_LOOP0:
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, TEMP(1), value);
       break;
-    case PIM_ISL_TEMP2:
+    case PIM_ISL_TEMP_LOOP1:
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, TEMP(2), value);
       break;
-    case PIM_ISL_TEMP3:
+    case PIM_ISL_TEMP_LOOP2:
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, TEMP(3), value);
       break;
-    case PIM_ISL_TEMP4:
+    case PIM_ISL_TEMP_INTERNAL:
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
       ret = read_attr(fru, sensor_num, full_name, TEMP(4), value);
-      break;
-    case PIM_ISL_TEMP5:
-      dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
-      ret = read_attr(fru, sensor_num, full_name, TEMP(5), value);
-      break;
-    case PIM_ISL_TEMP6:
-      dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
-      ret = read_attr(fru, sensor_num, full_name, TEMP(6), value);
-      break;
-    case PIM_ISL_TEMP7:
-      dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
-      ret = read_attr(fru, sensor_num, full_name, TEMP(7), value);
       break;
     case PIM_ISL_PIN_LOOP0:
       dir_pim_sensor_hwmon(full_name, i2cbus, PIM_ISL68224_DEVICE_ADDR);
@@ -1906,6 +1833,145 @@ psu_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
 }
 
 static int
+fan_init_sys_airflow_cfg_key(void) {
+  char value[MAX_VALUE_LEN];
+
+  snprintf(value, sizeof(value), "%d", CONFIG_UNKNOWN);
+  kv_set(KV_SYS_AIRFLOW_CFG_KEY, value, 0, KV_FCREATE);
+  return 0;
+}
+
+static int
+fan_sys_airflow_cfg_log(int curr_state) {
+  int ret, old_state;
+  char old_value[MAX_VALUE_LEN] = {0};
+  char curr_value[MAX_VALUE_LEN] = {0};
+
+  ret = kv_get(KV_SYS_AIRFLOW_CFG_KEY, old_value, NULL, 0);
+  if (ret < 0) {
+    return ret;
+  }
+
+  old_state = atoi(old_value);
+
+  if (curr_state != old_state) {
+    switch(curr_state) {
+      case CONFIG_8PIM16Q_0PIM8DDM_2PSU:
+        syslog(LOG_CRIT,
+               "SYSTEM_AIRFLOW: 8 PIM16Q 0 PIM8DDM 2 PSU "
+               "fan configuration detected");
+        break;
+      case CONFIG_5PIM16Q_3PIM8DDM_2PSU:
+        syslog(LOG_CRIT,
+               "SYSTEM_AIRFLOW: 5 PIM16Q 3 PIM8DDM 2 PSU "
+               "fan configuration detected");
+        break;
+      case CONFIG_2PIM16Q_6PIM8DDM_4PSU:
+        syslog(LOG_CRIT,
+               "SYSTEM_AIRFLOW: 2 PIM16Q 6 PIM8DDM 4 PSU "
+               "fan configuration detected");
+        break;
+      case CONFIG_0PIM16Q_8PIM8DDM_4PSU:
+        syslog(LOG_CRIT,
+               "SYSTEM_AIRFLOW: 0 PIM16Q 8 PIM8DDM 4 PSU "
+               "fan configuration detected");
+        break;
+      case CONFIG_UNKNOWN:
+      default:
+        syslog(LOG_CRIT,
+               "SYSTEM_AIRFLOW: UNKNOWN fan configuration detected, "
+               "assuming 0 PIM16Q 8 PIM8DDM 4 PSU fan configuration");
+        break;
+    }
+
+    snprintf(curr_value, sizeof(curr_value), "%d", curr_state);
+    kv_set(KV_SYS_AIRFLOW_CFG_KEY, curr_value, 0, 0);
+  }
+
+  return 0;
+}
+
+static int
+fan_sys_airflow_cfg_check(void) {
+  uint8_t fru, psu_prsnt, pim_type;
+  uint8_t num_pim8ddm = 0, num_pim16q = 0, num_psu = 0;
+
+  for (fru = FRU_PIM2; fru <= FRU_PIM9; fru++) {
+    pim_type = pal_get_pim_type_from_file(fru);
+    if (pim_type == PIM_TYPE_16Q) {
+      num_pim16q++;
+    } else if (pim_type == PIM_TYPE_8DDM) {
+      num_pim8ddm++;
+    }
+  }
+
+  for (fru = FRU_PSU1; fru <= FRU_PSU4; fru++) {
+    pal_is_fru_prsnt(fru, &psu_prsnt);
+    if (psu_prsnt) {
+      num_psu++;
+    }
+  }
+
+  if (num_pim16q == 8 && num_pim8ddm == 0 && num_psu == 2) {
+    return CONFIG_8PIM16Q_0PIM8DDM_2PSU;
+  } else if (num_pim16q == 5 && num_pim8ddm == 3 && num_psu == 2) {
+    return CONFIG_5PIM16Q_3PIM8DDM_2PSU;
+  } else if (num_pim16q == 2 && num_pim8ddm == 6 && num_psu == 4) {
+    return CONFIG_2PIM16Q_6PIM8DDM_4PSU;
+  } else if (num_pim16q == 0 && num_pim8ddm == 8 && num_psu == 4) {
+    return CONFIG_0PIM16Q_8PIM8DDM_4PSU;
+  } else {
+    return CONFIG_UNKNOWN;
+  }
+}
+
+static int
+fan_sys_airflow_read(float *value) {
+  int cfg, pwm_value, pwm_pct, cfm_div, cfm_rem, fan;
+  float pwm_total = 0, cfm_delta, *cfm_lookup;
+  sensor_path_t pwm_path;
+
+  cfg = fan_sys_airflow_cfg_check();
+  fan_sys_airflow_cfg_log(cfg);
+
+  switch(cfg) {
+    case CONFIG_8PIM16Q_0PIM8DDM_2PSU:
+      cfm_lookup = cfm_lookup_8pim16q_0pim8ddm_2psu;
+      break;
+    case CONFIG_5PIM16Q_3PIM8DDM_2PSU:
+      cfm_lookup = cfm_lookup_5pim16q_3pim8ddm_2psu;
+      break;
+    case CONFIG_2PIM16Q_6PIM8DDM_4PSU:
+      cfm_lookup = cfm_lookup_2pim16q_6pim8ddm_4psu;
+      break;
+    case CONFIG_0PIM16Q_8PIM8DDM_4PSU:
+      cfm_lookup = cfm_lookup_0pim16q_8pim8ddm_4psu;
+      break;
+    case CONFIG_UNKNOWN:
+    default:
+      cfm_lookup = cfm_lookup_0pim16q_8pim8ddm_4psu;
+      break;
+  }
+
+  for (fan = 1; fan <= MAX_FAN; fan++) {
+    snprintf(pwm_path.name, sizeof(pwm_path.name), "%s/fan%d_pwm",
+             FAN_CPLD_DEVICE, fan);
+    if (device_read(pwm_path.name, &pwm_value)) {
+      return -1;
+    }
+    pwm_total += pwm_value;
+  }
+
+  pwm_pct = (pwm_total * 100) / (PWM_MAX * MAX_FAN);
+  cfm_div = pwm_pct / CFM_STEP;
+  cfm_rem = pwm_pct % CFM_STEP;
+  cfm_delta = (cfm_lookup[cfm_div + 1] - cfm_lookup[cfm_div]) / CFM_STEP * cfm_rem;
+  *value = cfm_lookup[cfm_div] + cfm_delta;
+
+  return 0;
+}
+
+static int
 fan_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
   int ret = -1;
   int i = 0;
@@ -1940,6 +2006,9 @@ fan_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
         break;
       case FAN_CARD_OUTLET_TEMP:
         ret = read_attr(fru, sensor_num, FAN_MAX6658_DEVICE, TEMP(2), value);
+        break;
+      case SYSTEM_AIRFLOW:
+        ret = fan_sys_airflow_read(value);
         break;
       default:
         ret = READING_NA;
@@ -2137,20 +2206,11 @@ get_smb_sensor_name(uint8_t sensor_num, char *name) {
     case TH4_VRD1_VIN:
       sprintf(name, "TH4_VRD1_VIN");
       break;
-    case TH4_VRD1_VMON:
-      sprintf(name, "TH4_VRD1_VMON");
-      break;
     case TH4_VRD1_VOUT_LOOP0:
       sprintf(name, "TH4_VRD1_VOUT_LOOP0");
       break;
-    case TH4_VRD1_TEMP1:
-      sprintf(name, "TH4_VRD1_TEMP1");
-      break;
-    case TH4_VRD1_TEMP2:
-      sprintf(name, "TH4_VRD1_TEMP2");
-      break;
-    case TH4_VRD1_TEMP3:
-      sprintf(name, "TH4_VRD1_TEMP3");
+    case TH4_VRD1_TEMP_LOOP0:
+      sprintf(name, "TH4_VRD1_TEMP_LOOP0");
       break;
     case TH4_VRD1_PIN:
       sprintf(name, "TH4_VRD1_PIN");
@@ -2167,9 +2227,6 @@ get_smb_sensor_name(uint8_t sensor_num, char *name) {
     case TH4_VRD2_VIN:
       sprintf(name, "TH4_VRD2_VIN");
       break;
-    case TH4_VRD2_VMON:
-      sprintf(name, "TH4_VRD2_VMON");
-      break;
     case TH4_VRD2_VOUT_LOOP0:
       sprintf(name, "TH4_VRD2_VOUT_LOOP0");
       break;
@@ -2179,26 +2236,17 @@ get_smb_sensor_name(uint8_t sensor_num, char *name) {
     case TH4_VRD2_VOUT_LOOP2:
       sprintf(name, "TH4_VRD2_VOUT_LOOP2");
       break;
-    case TH4_VRD2_TEMP1:
-      sprintf(name, "TH4_VRD2_TEMP1");
+    case TH4_VRD2_TEMP_LOOP0:
+      sprintf(name, "TH4_VRD2_TEMP_LOOP0");
       break;
-    case TH4_VRD2_TEMP2:
-      sprintf(name, "TH4_VRD2_TEMP2");
+    case TH4_VRD2_TEMP_LOOP1:
+      sprintf(name, "TH4_VRD2_TEMP_LOOP1");
       break;
-    case TH4_VRD2_TEMP3:
-      sprintf(name, "TH4_VRD2_TEMP3");
+    case TH4_VRD2_TEMP_LOOP2:
+      sprintf(name, "TH4_VRD2_TEMP_LOOP2");
       break;
-    case TH4_VRD2_TEMP4:
-      sprintf(name, "TH4_VRD2_TEMP4");
-      break;
-    case TH4_VRD2_TEMP5:
-      sprintf(name, "TH4_VRD2_TEMP5");
-      break;
-    case TH4_VRD2_TEMP6:
-      sprintf(name, "TH4_VRD2_TEMP6");
-      break;
-    case TH4_VRD2_TEMP7:
-      sprintf(name, "TH4_VRD2_TEMP7");
+    case TH4_VRD2_TEMP_INTERNAL:
+      sprintf(name, "TH4_VRD2_TEMP_INTERNAL");
       break;
     case TH4_VRD2_PIN_LOOP0:
       sprintf(name, "TH4_VRD2_PIN_LOOP0");
@@ -2374,9 +2422,6 @@ get_pim_sensor_name(uint8_t sensor_num, uint8_t fru, char *name) {
     case PIM_ISL_VIN:
       sprintf(name, "PIM%d_ISL_VIN", pimid);
       break;
-    case PIM_ISL_VMON:
-      sprintf(name, "PIM%d_ISL_VMON", pimid);
-      break;
     case PIM_ISL_VOUT_LOOP0:
       sprintf(name, "PIM%d_ISL_VOUT_LOOP0", pimid);
       break;
@@ -2386,26 +2431,17 @@ get_pim_sensor_name(uint8_t sensor_num, uint8_t fru, char *name) {
     case PIM_ISL_VOUT_LOOP2:
       sprintf(name, "PIM%d_ISL_VOUT_LOOP2", pimid);
       break;
-    case PIM_ISL_TEMP1:
-      sprintf(name, "PIM%d_ISL_TEMP1", pimid);
+    case PIM_ISL_TEMP_LOOP0:
+      sprintf(name, "PIM%d_ISL_TEMP_LOOP0", pimid);
       break;
-    case PIM_ISL_TEMP2:
-      sprintf(name, "PIM%d_ISL_TEMP2", pimid);
+    case PIM_ISL_TEMP_LOOP1:
+      sprintf(name, "PIM%d_ISL_TEMP_LOOP1", pimid);
       break;
-    case PIM_ISL_TEMP3:
-      sprintf(name, "PIM%d_ISL_TEMP3", pimid);
+    case PIM_ISL_TEMP_LOOP2:
+      sprintf(name, "PIM%d_ISL_TEMP_LOOP2", pimid);
       break;
-    case PIM_ISL_TEMP4:
-      sprintf(name, "PIM%d_ISL_TEMP4", pimid);
-      break;
-    case PIM_ISL_TEMP5:
-      sprintf(name, "PIM%d_ISL_TEMP5", pimid);
-      break;
-    case PIM_ISL_TEMP6:
-      sprintf(name, "PIM%d_ISL_TEMP6", pimid);
-      break;
-    case PIM_ISL_TEMP7:
-      sprintf(name, "PIM%d_ISL_TEMP7", pimid);
+    case PIM_ISL_TEMP_INTERNAL:
+      sprintf(name, "PIM%d_ISL_TEMP_INTERNAL", pimid);
       break;
     case PIM_ISL_PIN_LOOP0:
       sprintf(name, "PIM%d_ISL_PIN_LOOP0", pimid);
@@ -2531,6 +2567,9 @@ get_fan_sensor_name(uint8_t sensor_num, char *name) {
     case FAN_CARD_OUTLET_TEMP:
       sprintf(name, "FAN_CARD_OUTLET_TEMP");
       break;
+    case SYSTEM_AIRFLOW:
+      sprintf(name, "SYSTEM_AIRFLOW");
+      break;
     default:
       return -1;
   }
@@ -2620,10 +2659,8 @@ get_smb_sensor_units(uint8_t sensor_num, char *units) {
     case SMB_POS_2V5B_E:
     case SMB_POS_3V3B_E:
     case TH4_VRD1_VIN:
-    case TH4_VRD1_VMON:
     case TH4_VRD1_VOUT_LOOP0:
     case TH4_VRD2_VIN:
-    case TH4_VRD2_VMON:
     case TH4_VRD2_VOUT_LOOP0:
     case TH4_VRD2_VOUT_LOOP1:
     case TH4_VRD2_VOUT_LOOP2:
@@ -2649,16 +2686,11 @@ get_smb_sensor_units(uint8_t sensor_num, char *units) {
     case TH4_VRD2_POUT_LOOP2:
       sprintf(units, POWER_UNIT);
       break;
-    case TH4_VRD1_TEMP1:
-    case TH4_VRD1_TEMP2:
-    case TH4_VRD1_TEMP3:
-    case TH4_VRD2_TEMP1:
-    case TH4_VRD2_TEMP2:
-    case TH4_VRD2_TEMP3:
-    case TH4_VRD2_TEMP4:
-    case TH4_VRD2_TEMP5:
-    case TH4_VRD2_TEMP6:
-    case TH4_VRD2_TEMP7:
+    case TH4_VRD1_TEMP_LOOP0:
+    case TH4_VRD2_TEMP_LOOP0:
+    case TH4_VRD2_TEMP_LOOP1:
+    case TH4_VRD2_TEMP_LOOP2:
+    case TH4_VRD2_TEMP_INTERNAL:
     case SMB_T:
     case TH4_DIE_TEMP_0:
     case TH4_DIE_TEMP_1:
@@ -2707,7 +2739,6 @@ get_pim_sensor_units(uint8_t sensor_num, char *units) {
     case PIM_POS_1V5:
     case PIM_POS_1V8:
     case PIM_ISL_VIN:
-    case PIM_ISL_VMON:
     case PIM_ISL_VOUT_LOOP0:
     case PIM_ISL_VOUT_LOOP1:
     case PIM_ISL_VOUT_LOOP2:
@@ -2719,13 +2750,10 @@ get_pim_sensor_units(uint8_t sensor_num, char *units) {
     case PIM_POS_3V3_L_TEMP:
     case PIM_LM73_TEMP:
     case PIM_DPM_TEMP:
-    case PIM_ISL_TEMP1:
-    case PIM_ISL_TEMP2:
-    case PIM_ISL_TEMP3:
-    case PIM_ISL_TEMP4:
-    case PIM_ISL_TEMP5:
-    case PIM_ISL_TEMP6:
-    case PIM_ISL_TEMP7:
+    case PIM_ISL_TEMP_LOOP0:
+    case PIM_ISL_TEMP_LOOP1:
+    case PIM_ISL_TEMP_LOOP2:
+    case PIM_ISL_TEMP_INTERNAL:
     case PIM_ECB_TEMP:
       sprintf(units, TEMP_UNIT);
       break;
@@ -2800,6 +2828,9 @@ get_fan_sensor_units(uint8_t sensor_num, char *units) {
     case FAN_CARD_OUTLET_TEMP:
       sprintf(units, TEMP_UNIT);
       break;
+    case SYSTEM_AIRFLOW:
+      sprintf(units, CFM_UNIT);
+      break;
     default:
       return -1;
   }
@@ -2854,18 +2885,18 @@ sensor_thresh_array_init(uint8_t fru) {
     case FRU_SCM:
       // ECB
       scm_sensor_threshold[SCM_ECB_VIN][UCR_THRESH] = 14.4;
-      scm_sensor_threshold[SCM_ECB_VIN][LCR_THRESH] = 9.6;
+      scm_sensor_threshold[SCM_ECB_VIN][LCR_THRESH] = 4.8;
       scm_sensor_threshold[SCM_ECB_VIN][UNC_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_VIN][LNC_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_VOUT][UCR_THRESH] = 14.4;
       scm_sensor_threshold[SCM_ECB_VOUT][LCR_THRESH] = 9.6;
       scm_sensor_threshold[SCM_ECB_VOUT][UNC_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_VOUT][LNC_THRESH] = 0; // unset
-      scm_sensor_threshold[SCM_ECB_CURR][UCR_THRESH] = 10;
+      scm_sensor_threshold[SCM_ECB_CURR][UCR_THRESH] = 24;
       scm_sensor_threshold[SCM_ECB_CURR][LCR_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_CURR][UNC_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_CURR][LNC_THRESH] = 0; // unset
-      scm_sensor_threshold[SCM_ECB_POWER][UCR_THRESH] = 120;
+      scm_sensor_threshold[SCM_ECB_POWER][UCR_THRESH] = 288;
       scm_sensor_threshold[SCM_ECB_POWER][LCR_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_POWER][UNC_THRESH] = 0; // unset
       scm_sensor_threshold[SCM_ECB_POWER][LNC_THRESH] = 0; // unset
@@ -2956,26 +2987,14 @@ sensor_thresh_array_init(uint8_t fru) {
       smb_sensor_threshold[TH4_VRD1_VIN][LCR_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD1_VIN][UNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD1_VIN][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_VMON][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_VMON][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_VMON][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_VMON][LNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD1_VOUT_LOOP0][UCR_THRESH] = 1.068;
       smb_sensor_threshold[TH4_VRD1_VOUT_LOOP0][LCR_THRESH] = 0.712;
       smb_sensor_threshold[TH4_VRD1_VOUT_LOOP0][UNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD1_VOUT_LOOP0][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP1][UCR_THRESH] = 125;
-      smb_sensor_threshold[TH4_VRD1_TEMP1][LCR_THRESH] = -40;
-      smb_sensor_threshold[TH4_VRD1_TEMP1][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP1][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP2][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP2][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP2][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP2][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP3][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP3][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP3][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD1_TEMP3][LNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD1_TEMP_LOOP0][UCR_THRESH] = 125;
+      smb_sensor_threshold[TH4_VRD1_TEMP_LOOP0][LCR_THRESH] = -40;
+      smb_sensor_threshold[TH4_VRD1_TEMP_LOOP0][UNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD1_TEMP_LOOP0][LNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD1_PIN][UCR_THRESH] = 600;
       smb_sensor_threshold[TH4_VRD1_PIN][LCR_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD1_PIN][UNC_THRESH] = 0; // unset
@@ -2993,10 +3012,6 @@ sensor_thresh_array_init(uint8_t fru) {
       smb_sensor_threshold[TH4_VRD2_VIN][LCR_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD2_VIN][UNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD2_VIN][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_VMON][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_VMON][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_VMON][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_VMON][LNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD2_VOUT_LOOP0][UCR_THRESH] = 0.847;
       smb_sensor_threshold[TH4_VRD2_VOUT_LOOP0][LCR_THRESH] = 0.693;
       smb_sensor_threshold[TH4_VRD2_VOUT_LOOP0][UNC_THRESH] = 0; // unset
@@ -3009,34 +3024,22 @@ sensor_thresh_array_init(uint8_t fru) {
       smb_sensor_threshold[TH4_VRD2_VOUT_LOOP2][LCR_THRESH] = 1.08;
       smb_sensor_threshold[TH4_VRD2_VOUT_LOOP2][UNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD2_VOUT_LOOP2][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP1][UCR_THRESH] = 125;
-      smb_sensor_threshold[TH4_VRD2_TEMP1][LCR_THRESH] = -40;
-      smb_sensor_threshold[TH4_VRD2_TEMP1][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP1][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP2][UCR_THRESH] = 125;
-      smb_sensor_threshold[TH4_VRD2_TEMP2][LCR_THRESH] = -40;
-      smb_sensor_threshold[TH4_VRD2_TEMP2][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP2][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP3][UCR_THRESH] = 125;
-      smb_sensor_threshold[TH4_VRD2_TEMP3][LCR_THRESH] = -40;
-      smb_sensor_threshold[TH4_VRD2_TEMP3][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP3][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP4][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP4][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP4][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP4][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP5][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP5][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP5][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP5][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP6][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP6][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP6][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP6][LNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP7][UCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP7][LCR_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP7][UNC_THRESH] = 0; // unset
-      smb_sensor_threshold[TH4_VRD2_TEMP7][LNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP0][UCR_THRESH] = 125;
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP0][LCR_THRESH] = -40;
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP0][UNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP0][LNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP1][UCR_THRESH] = 125;
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP1][LCR_THRESH] = -40;
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP1][UNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP1][LNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP2][UCR_THRESH] = 125;
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP2][LCR_THRESH] = -40;
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP2][UNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_LOOP2][LNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_INTERNAL][UCR_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_INTERNAL][LCR_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_INTERNAL][UNC_THRESH] = 0; // unset
+      smb_sensor_threshold[TH4_VRD2_TEMP_INTERNAL][LNC_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD2_PIN_LOOP0][UCR_THRESH] = 600;
       smb_sensor_threshold[TH4_VRD2_PIN_LOOP0][LCR_THRESH] = 0; // unset
       smb_sensor_threshold[TH4_VRD2_PIN_LOOP0][UNC_THRESH] = 0; // unset
@@ -3269,6 +3272,10 @@ sensor_thresh_array_init(uint8_t fru) {
       fan_sensor_threshold[FAN_CARD_OUTLET_TEMP][UCR_THRESH] = 90;
       fan_sensor_threshold[FAN_CARD_OUTLET_TEMP][LNC_THRESH] = 0; // unset
       fan_sensor_threshold[FAN_CARD_OUTLET_TEMP][LCR_THRESH] = 0; // unset
+      fan_sensor_threshold[SYSTEM_AIRFLOW][UNC_THRESH] = 0; // unset
+      fan_sensor_threshold[SYSTEM_AIRFLOW][UCR_THRESH] = 0; // unset
+      fan_sensor_threshold[SYSTEM_AIRFLOW][LNC_THRESH] = 0; // unset
+      fan_sensor_threshold[SYSTEM_AIRFLOW][LCR_THRESH] = 0; // unset
       break;
   }
   init_threshold_done[fru] = true;
@@ -3324,8 +3331,6 @@ get_sensor_desc(uint8_t fru, uint8_t snr_num) {
 
   return &m_snr_desc[fru - 1][snr_num];
 }
-
-// ELBERTTODO: update poll intervals for specific sensors as needed.
 
 static void
 scm_sensor_poll_interval(uint8_t sensor_num, uint32_t *value) {
@@ -3425,6 +3430,9 @@ pal_init_sensor_check(uint8_t fru, uint8_t snr_num, void *snr) {
     case FRU_PSU3:
     case FRU_PSU4:
       psu_init_acok_key(fru);
+      break;
+    case FRU_FAN:
+      fan_init_sys_airflow_cfg_key();
       break;
   }
 

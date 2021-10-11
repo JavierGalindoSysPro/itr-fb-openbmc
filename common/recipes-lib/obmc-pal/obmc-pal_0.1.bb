@@ -11,7 +11,7 @@ LICENSE = "LGPLv2"
 # Use LGPL-2.1-only instead.
 def lic_file_name(d):
     distro = d.getVar('DISTRO_CODENAME', True)
-    if distro in [ 'rocko', 'zeus', 'dunfell', 'gatesgarth' ]:
+    if distro in [ 'rocko', 'zeus', 'dunfell' ]:
         return "LGPL-2.1;md5=1a6d268fd218675ffea8be556788b780"
 
     return "LGPL-2.1-only;md5=1a6d268fd218675ffea8be556788b780"
@@ -35,5 +35,5 @@ do_install() {
   cp obmc_pal_sensors.h ${D}${includedir}/openbmc/obmc_pal_sensors.h
 }
 
-FILES_${PN}-dev += "${includedir}openbmc/obmc-pal.h ${includedir}openbmc/obmc_pal_sensors.h"
+FILES:${PN}-dev += "${includedir}openbmc/obmc-pal.h ${includedir}openbmc/obmc_pal_sensors.h"
 DEPENDS += " libkv libipmi libipmb"
