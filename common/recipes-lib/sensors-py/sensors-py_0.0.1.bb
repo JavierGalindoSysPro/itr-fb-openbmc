@@ -18,12 +18,12 @@ LIC_FILES_CHKSUM = "\
 DEPENDS = "python3 libobmc-sensors"
 FILESEXTRAPATHS:prepend := "${THISDIR}/patches:"
 
-SRC_URI = "https://github.com/paroj/sensors.py/archive/refs/heads/master.zip \
+SRC_URI = "https://github.com/paroj/sensors.py/archive/refs/heads/4001b2c1ee00d9d7753827609f98920461a364b7.zip \
            file://001-load-so-fix.patch \
           "
-SRC_URI[sha256sum] = "38d7b3736eb933999647344ea7fa43426dd6f86fbd929c2a0c59af9762e29005"
+SRC_URI[sha256sum] = "026d7c113916929c14bc029ed39271aeda98892fc621a827b3088a010403679c"
 
-S = "${WORKDIR}/sensors.py-master"
+S = "${WORKDIR}/sensors.py-4001b2c1ee00d9d7753827609f98920461a364b7"
 
 inherit python3-dir
 
